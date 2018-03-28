@@ -1,0 +1,42 @@
+.PATTERN ::= .HUMAN-PATTERN{$} -> $1
+.PATTERN ::= .COMPANY-PATTERN{$} -> $1
+
+.HUMAN-PATTERN ::= ihminen{$} -> Human
+.HUMAN-PATTERN ::= työntekijä{$} -> Employee
+
+.HUMAN-PATTERN ::= mies{$} -> Male
+.HUMAN-PATTERN ::= nainen{$} -> Female
+
+.HUMAN-PATTERN ::= suomalainen{$} -> Finnish
+.HUMAN-PATTERN ::= ulkomaalainen{$} -> Foreign
+
+.HUMAN-PATTERN ::= .HUMAN-ADJ{$} .HUMAN-PATTERN{$} -> $2.is($1)
+.HUMAN-PATTERN ::= .HUMAN-PATTERN{$} joka .HUMAN-S -> $1.$2
+.HUMAN-PATTERN ::= .HUMAN-PATTERN{$} jonka .HUMAN-P -> $1.$2
+
+.HUMAN-ADJ ::= miespuolinen{$} -> Male
+.HUMAN-ADJ ::= naispuolinen{$} -> Female
+.HUMAN-ADJ ::= suomalainen{$} -> Finnish
+.HUMAN-ADJ ::= ulkomaalainen{$} -> Foreign
+
+.HUMAN-S ::= työskentelee .COMPANY-PATTERN{ulkotulento} -> worksFor($1)
+.HUMAN-S ::= on .HUMAN-PATTERN{nimento} -> is($1)
+
+.HUMAN-P ::= työnantaja .COMPANY-S -> employer.$1
+.HUMAN-P ::= työnantajan .COMPANY-P -> employer.$1
+
+.COMPANY-PATTERN ::= yhtiö{$} -> Company
+.COMPANY-PATTERN ::= yritys{$} -> Company
+.COMPANY-PATTERN ::= .COMPANY-ADJ{$} .COMPANY-PATTERN{$} -> $2.is($1)
+.COMPANY-PATTERN ::= .COMPANY-PATTERN{$} joka .COMPANY-S -> $1.$2
+.COMPANY-PATTERN ::= .COMPANY-PATTERN{$} jonka .COMPANY-P -> $1.$2
+
+.COMPANY-ADJ ::= suuri{$} -> Large
+.COMPANY-ADJ ::= pieni{$} -> Small
+.COMPANY-ADJ ::= suomalainen{$} -> Finnish
+.COMPANY-ADJ ::= ulkomaalainen{$} -> Foreign
+
+.COMPANY-S ::= työllistää .HUMAN-PATTERN{omanto} -> employs($1)
+.COMPANY-S ::= on .COMPANY-PATTERN{nimento} -> is($1)
+
+.COMPANY-P ::= toimitusjohtaja .HUMAN-S -> ceo.$1
