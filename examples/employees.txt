@@ -14,6 +14,8 @@
 .HUMAN-PATTERN ::= .HUMAN-PATTERN{$} joka .HUMAN-S -> $1.$2
 .HUMAN-PATTERN ::= .HUMAN-PATTERN{$} jonka .HUMAN-P -> $1.$2
 
+.HUMAN-PATTERN ::= .COMPANY-PATTERN{omanto} toimitusjohtaja{$} -> $1.ceo
+
 .HUMAN-ADJ ::= miespuolinen{$} -> Male
 .HUMAN-ADJ ::= naispuolinen{$} -> Female
 .HUMAN-ADJ ::= suomalainen{$} -> Finnish
@@ -31,6 +33,8 @@
 .COMPANY-PATTERN ::= .COMPANY-PATTERN{$} joka .COMPANY-S -> $1.$2
 .COMPANY-PATTERN ::= .COMPANY-PATTERN{$} jonka .COMPANY-P -> $1.$2
 
+.COMPANY-PATTERN ::= .HUMAN-PATTERN{omanto} työnantaja{$} -> $1.ceo
+
 .COMPANY-ADJ ::= suuri{$} -> Large
 .COMPANY-ADJ ::= pieni{$} -> Small
 .COMPANY-ADJ ::= suomalainen{$} -> Finnish
@@ -40,3 +44,4 @@
 .COMPANY-S ::= on .COMPANY-PATTERN{nimento} -> is($1)
 
 .COMPANY-P ::= toimitusjohtaja .HUMAN-S -> ceo.$1
+.COMPANY-P ::= toimitusjohtajan .HUMAN-P -> ceo.$1
