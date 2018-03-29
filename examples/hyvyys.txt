@@ -1,0 +1,5 @@
+Ihminen on asian alakäsite.
+Paha ihminen on ihmisen alakäsite.
+Ihmisellä on hyvyys, joka on merkkijono.
+Ihmisen hyvyys on yleensä "suuri".
+Pahan ihmisen hyvyys on yleensä "pieni".
