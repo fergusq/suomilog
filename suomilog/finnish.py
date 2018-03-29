@@ -37,6 +37,7 @@ def baseformAndBits(word):
 	addBits(word, bits, "SIJAMUOTO")
 	addBits(word, bits, "CLASS")
 	addBits(word, bits, "PARTICIPLE")
+	addBits(word, bits, "MOOD", {"MINEN-infinitive": "-minen", "MA-infinitive": "-ma", "E-infinitive": "-e", "A-infinitive": "-a"})
 	return word["BASEFORM"], bits
 
 def addBits(word, bits, name, table=None):
