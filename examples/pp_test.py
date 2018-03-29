@@ -20,8 +20,8 @@ from suomilog.patternparser import *
 from suomilog.finnish import tokenize
 
 query = Pattern("QUERY", [
-	Token("hae", "", set()),
-	Token("jokainen", "", set()),
+	Token("hae", []),
+	Token("jokainen", []),
 	PatternRef("PATTERN", {"nimento", "yksikkö"})
 ], StringOutput("search($1)"))
 
@@ -32,7 +32,6 @@ with open(os.path.join(path, "employees.txt")) as file:
 			parseGrammarLine(line.replace("\n", ""))
 
 n_patterns = sum([len(category) for category in PATTERNS.values()])
-
 print("Ladattu", n_patterns, "fraasia.")
 
 while True:

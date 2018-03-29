@@ -24,20 +24,19 @@ def tokenize(text):
 	for token in voikko.tokens(text):
 		if token.tokenType == lv.Token.WHITESPACE:
 			continue
-		baseforms = set()
-		bits = set()
+		alternatives = []
 		for word in voikko.analyze(token.tokenText):
 			if "BASEFORM" in word:
-				bf, bs = baseformAndBits(word)
-				baseforms.add(bf)
-				bits |= bs
-		tokens.append(pp.Token(token.tokenText, baseforms, bits))
+				alternatives.append(baseformAndBits(word))
+		tokens.append(pp.Token(token.tokenText.lower(), alternatives))
 	return tokens
 
 def baseformAndBits(word):
 	bits = set()
 	addBits(word, bits, "NUMBER", {"singular": "yksikkö", "plural": "monikko"})
 	addBits(word, bits, "SIJAMUOTO")
+	addBits(word, bits, "CLASS")
+	addBits(word, bits, "PARTICIPLE")
 	return word["BASEFORM"], bits
 
 def addBits(word, bits, name, table=None):

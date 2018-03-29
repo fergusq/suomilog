@@ -18,10 +18,12 @@ import re
 import itertools
 from copy import deepcopy
 
-def parseGrammarLine(line, output=None):
+def parseGrammarLine(line, *outputs):
+	if DEBUG >= 1:
+		print(line)
 	tokens = line.replace("\t", " ").split(" ")
-	if len(tokens) > 2 and tokens[1] == "::=" and "->" in tokens:
-		end = tokens.index("->") if not output else len(tokens)
+	if len(tokens) > 2 and tokens[1] == "::=" and (outputs or "->" in tokens):
+		end = tokens.index("->") if "->" in tokens else len(tokens)
 		category = tokens[0][1:]
 		words = []
 		for token in tokens[2:end]:
@@ -31,32 +33,35 @@ def parseGrammarLine(line, output=None):
 			else:
 				bits = set()
 			if token == ".":
-				words.append(Token(".", {""}, set()))
+				words.append(Token(".", []))
 			elif token[0] == ".":
 				words.append(PatternRef(token[1:], bits))
 			elif bits:
-				words.append(Token("", {token}, bits))
+				words.append(Token("", [(token, bits)]))
 			else:
-				words.append(Token(token, {""}, set()))
+				words.append(Token(token, []))
 		if category not in PATTERNS:
 			PATTERNS[category] = []
-		pattern = Pattern(category, words, output if output else StringOutput(" ".join(tokens[end+1:])))
+		if "->" in tokens:
+			outputs = outputs + (StringOutput(" ".join(tokens[end+1:])),)
+		pattern = Pattern(category, words, MultiOutput(outputs) if len(outputs) > 1 else outputs[0])
 		PATTERNS[category].append(pattern)
 		return pattern
 	else:
 		raise Exception("Syntax error on line `" + line + "'")
 
 class Token:
-	def __init__(self, token, baseforms, bits):
-		if isinstance(baseforms, str):
-			baseforms = {baseforms}
+	def __init__(self, token, alternatives):
 		self.token = token
-		self.baseforms = baseforms
-		self.bits = bits
+		self.alternatives = alternatives
 	def __repr__(self):
-		return "Token(" + repr(self.token) + ", " + repr(self.baseforms) + ", " + repr(self.bits) + ")"
+		return "Token(" + repr(self.token) + ", " + repr(self.alternatives) + ")"
 	def __str__(self):
-		return self.token + "/" + ",".join(self.baseforms) + "{" + ", ".join(self.bits) + "}"
+		return self.token + "[" + "/".join([baseform + "{" + ", ".join(bits) + "}" for baseform, bits in self.alternatives]) + "]"
+	def toCode(self):
+		return self.token + "/".join([baseform + "{" + ",".join(bits) + "}" for baseform, bits in self.alternatives])
+	def containsMatch(self, alternatives):
+		return any([any([tbf == baseform and tbits >= bits for tbf, tbits in self.alternatives]) for baseform, bits in alternatives])
 
 class PatternRef:
 	def __init__(self, name, bits):
@@ -64,6 +69,19 @@ class PatternRef:
 		self.bits = bits
 	def __repr__(self):
 		return "PatternRef(" + repr(self.name) + ", " + repr(self.bits) + ")"
+	def toCode(self):
+		return "." + self.name + ("{" + ",".join(self.bits) + "}" if self.bits else "")
+
+class MultiOutput:
+	def __init__(self, outputs):
+		self.outputs = outputs
+	def __repr__(self):
+		return "MultiOutput(" + repr(self.outputs) + ")"
+	def eval(self, args):
+		ans = []
+		for i, output in enumerate(self.outputs):
+			ans.append(output.eval([arg[i] for arg in args]))
+		return ans
 
 class StringOutput:
 	def __init__(self, string):
@@ -81,6 +99,16 @@ PATTERNS = {}
 DEBUG = 0
 indent = 0
 
+def setDebug(n):
+	global DEBUG
+	DEBUG = n
+
+def matchAll(tokens, category, bits):
+	ans = []
+	for pattern in PATTERNS[category]:
+		ans += pattern.match(tokens, bits)
+	return ans
+
 class Pattern:
 	def __init__(self, name, words, output):
 		self.name = name
@@ -88,38 +116,40 @@ class Pattern:
 		self.output = output
 	def __repr__(self):
 		return "Pattern(" + repr(self.name) + ", " + repr(self.words) + ", " + repr(self.output) + ")"
+	def toCode(self):
+		return " ".join([w.toCode() for w in self.words])
 	def match(self, tokens, bits, i=0, j=0, g=None):
+		global indent
 		groups = g or {w: [] for w in self.words if isinstance(w, PatternRef)}
 		ans = []
 		while i <= len(tokens) and j <= len(self.words):
-			token = tokens[i] if i < len(tokens) else Token("<END>", "<END>", set())
-			word = self.words[j] if j < len(self.words) else Token("<END>", "<END>", set())
+			token = tokens[i] if i < len(tokens) else Token("<END>", [])
+			word = self.words[j] if j < len(self.words) else Token("<END>", [])
 			if isinstance(word, PatternRef):
 				ans += self.match(tokens, bits, i, j+1, {w: groups[w].copy() for w in groups})
 				groups[word].append(token)
 				i += 1
 			else:
-				if token.token == word.token or (token.baseforms >= word.baseforms and (token.bits >= word.bits or ("$" in word.bits and token.bits >= bits))):
-					if DEBUG >= 2:
-						print("match:", token, word, bits)
+				if token.token.lower() == word.token.lower() or token.containsMatch([(wbf, bits if "$" in wbits else wbits) for wbf, wbits in word.alternatives]):
+					if DEBUG >= 3:
+						print(" "*indent+"match:", token, word, bits)
 					i += 1
 					j += 1
 				else:
-					if DEBUG >= 2:
-						print("no match:", token, word, bits)
+					if DEBUG >= 3:
+						print(" "*indent+"no match:", token, word, bits)
 					return ans
 		if j < len(self.words) or i < len(tokens):
 			if DEBUG >= 3:
-				print("remainder:", i, tokens, j, self.words)
+				print(" "*indent+"remainder:", i, tokens, j, self.words)
 			return ans
 		for w in groups:
 			if not groups[w]:
 				if DEBUG >= 3:
-					print("empty group:", w, self.words, tokens)
+					print(" "*indent+"empty group:", w, self.words, tokens)
 				return ans
 		
-		global indent
-		if DEBUG >= 1:
+		if DEBUG >= 2:
 			print(" "*indent, end="")
 			for w in self.words:
 				print(w.name+"=["+" ".join([str(w2) for w2 in groups[w]])+"]" if isinstance(w, PatternRef) else str(w), end=" ")
@@ -128,12 +158,10 @@ class Pattern:
 		
 		args = []
 		for i, w in enumerate([w for w in self.words if isinstance(w, PatternRef)]):
-			args.append([])
-			for p in PATTERNS[w.name]:
-				args[-1] += p.match(groups[w], (w.bits-{"$"})|(bits if "$" in w.bits else set()))
+			args.append(matchAll(groups[w], w.name, (w.bits-{"$"})|(bits if "$" in w.bits else set())))
 		ans = ans+[self.output.eval(c) for c in itertools.product(*args)]
 		
-		if DEBUG >= 1:
+		if DEBUG >= 2:
 			indent -= 1
 			print(" "*indent, end="")
 			print("->", ans)
