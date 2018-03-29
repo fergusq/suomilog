@@ -57,28 +57,29 @@ class FuncOutput:
 
 identity = FuncOutput(lambda x: x)
 
-def tokensToString(tokens):
-	return " ".join([t.token for t in tokens])
-
-def nameToCode(name, bits=None, case="nimento"):
+def nameToBaseform(tokens, bits, rbits):
 	ans = []
 	found = False
-	for token in reversed(name):
-		
+	for token in reversed(tokens):
 		for bf, tbits in token.alternatives:
 			if not found:
-				if case in tbits:
+				if rbits <= tbits:
 					ans.append((bf, bits or {"$"}))
 					found = True
 					break
 			else:
-				if case in tbits and ("laatusana" in tbits or "nimisana_laatusana" in tbits or "agent" in tbits):
+				if rbits <= tbits and ("laatusana" in tbits or "nimisana_laatusana" in tbits or "agent" in tbits):
 					ans.append((bf, bits or {"$"}))
 					break
 		else:
 			ans.append((token.token, set()))
-				
-	return " ".join([token + ("{" + ",".join(tbits) + "}" if tbits else "") for token, tbits in reversed(ans)])
+	return reversed(ans)
+
+def tokensToString(tokens, rbits={"nimento"}):
+	return " ".join([text for text, bits in nameToBaseform(tokens, {}, rbits)])
+
+def nameToCode(name, bits=None, rbits={"nimento"}):
+	return " ".join([token + ("{" + ",".join(tbits) + "}" if tbits else "") for token, tbits in nameToBaseform(name, bits, rbits)])
 
 # Luokat
 
@@ -146,6 +147,7 @@ def _defineClass(name_str, name_code, superclass):
 	pgl(".CLASS ::= %s -> %s" % (name_code, name_str), FuncOutput(lambda: rclass))
 	return rclass
 
+pgl(".CLASS-DEF ::= .* on käsite . -> class $1 : asia", FuncOutput(lambda x: defineClass(x, asia)))
 pgl(".CLASS-DEF ::= .* on .CLASS{omanto} alakäsite . -> class $1 : $2", FuncOutput(defineClass))
 pgl(".DEF ::= .CLASS-DEF -> $1", identity)
 
@@ -161,21 +163,24 @@ pgl('.EXPR-%d ::= " .STR-CONTENT " -> "$1"' % (merkkijono.id,), FuncOutput(lambd
 
 # Ominaisuudet
 
-def defineField(owner, name, vtype):
-	name_str = tokensToString(name)
+def defineField(owner, name, vtype, case="nimento"):
+	name_str = tokensToString(name, {"yksikkö", case})
 	global counter
 	counter += 1
 	for clazz in owner.subclasses():
 		field = RField(counter, name_str, vtype)
 		clazz.fields[name_str] = field
 	for clazz in vtype.superclasses():
-		pgl(".EXPR-%d ::= .EXPR-%d{omanto} %s -> $1.%s" % (clazz.id, owner.id, nameToCode(name), name_str), FuncOutput(lambda obj: obj.get(name_str)))
+		pgl(".EXPR-%d ::= .EXPR-%d{omanto} %s -> $1.%s" % (clazz.id, owner.id, nameToCode(name, rbits={"nimento", "yksikkö"}), name_str), FuncOutput(lambda obj: obj.get(name_str)))
 	def setDefaultValue(clazz, defa):
 		clazz.fields[name_str].default_value = defa
-	pgl(".FIELD-DEFAULT-DEF-%d ::= .CLASS-%d{omanto} %s on yleensä .EXPR-%d . -> $1.%s defaults $2" % (field.id, owner.id, nameToCode(name, {"nimento"}), vtype.id, name_str), FuncOutput(setDefaultValue))
+	pgl(".FIELD-DEFAULT-DEF-%d ::= .CLASS-%d{omanto} %s on yleensä .EXPR-%d . -> $1.%s defaults $2" % (
+		field.id, owner.id, nameToCode(name, {"nimento"}, rbits={case, "yksikkö"}), vtype.id, name_str
+		), FuncOutput(setDefaultValue))
 	pgl(".DEF ::= .FIELD-DEFAULT-DEF-%d -> $1" % (field.id,), identity)
 
 pgl(".FIELD-DEF ::= .CLASS{ulkoolento} on .* , joka on .CLASS{nimento} . -> $1.$2 : $3", FuncOutput(defineField))
+pgl(".FIELD-DEF ::= .CLASS{ulkoolento} on .* kutsuttu .CLASS{nimento} . -> $1.$2 : $3", FuncOutput(lambda *x: defineField(*x, case="tulento")))
 pgl(".DEF ::= .FIELD-DEF -> $1", identity)
 
 # Muuttujat
@@ -229,6 +234,13 @@ def main():
 				print(category, "::=")
 				for pattern in PATTERNS[category]:
 					print(" " + pattern.toCode())
+			continue
+		elif line == "/käsitteet":
+			def printClass(clazz, indent):
+				print(" "*indent + clazz.name + "{" + ", ".join(sorted(clazz.fields.keys())) + "}")
+				for subclass in sorted(clazz.direct_subclasses, key=lambda c: c.name):
+					printClass(subclass, indent+1)
+			printClass(asia, 0)
 			continue
 		elif line == "/debug 0":
 			setDebug(0)
