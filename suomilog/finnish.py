@@ -67,8 +67,8 @@ CASES = [
 	"ulkoolento",
 	"ulkotulento",
 	"ulkoeronto",
-	"sisäolento",
-	"sisätulento",
-	"sisäeronto",
+	"sisaolento",
+	"sisatulento",
+	"sisaeronto",
 	"vajanto"
 ]
