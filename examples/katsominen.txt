@@ -1,0 +1,8 @@
+Asialla on kuvaukseksi kutsuttu merkkijono.
+Asian kuvaus on yleensä "Ei mikään kiinnostava asia".
+
+[Asian] katsominen on toiminto.
+Katsomisen komento on "katso [asiaa]".
+
+Asian katsomisen aikana:
+	Sano sen kuvaus.
