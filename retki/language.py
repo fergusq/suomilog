@@ -119,16 +119,27 @@ def tokensToCode(tokens):
 counter = 0
 
 class RObject:
-	def __init__(self, rclass):
+	def __init__(self, rclass, name):
 		self.rclass = rclass
 		self.data = {}
 		self.extra = {}
+		self.bits = set()
+		self.name = name
+		if name:
+			self.data["nimi koodissa"] = merkkijono.newInstance().setExtra("str", name)
 	def get(self, field_name):
 		if field_name not in self.data:
 			self.data[field_name] = self.rclass.fields[field_name].default_value
 		return self.data[field_name]
 	def set(self, field_name, val):
 		self.data[field_name] = val
+	def bitOn(self, bit):
+		self.bits.add(bit)
+		return self
+	def bitOff(self, bit):
+		if bit in self.bits:
+			self.bits.remove(bit)
+		return self
 	def setExtra(self, name, data):
 		self.extra[name] = data
 		return self
@@ -149,8 +160,8 @@ class RClass:
 		
 		if superclass:
 			self.superclass.direct_subclasses.append(self)
-	def newInstance(self):
-		return RObject(self)
+	def newInstance(self, name=None):
+		return RObject(self, name)
 	def superclasses(self):
 		if self.superclass == None:
 			return [self]
@@ -178,13 +189,21 @@ class RField:
 class RPattern:
 	def __init__(self, rclass=None):
 		self.rclass = rclass
+		self.bits = set()
 	def matches(self, obj):
 		if self.rclass:
 			if obj.rclass not in self.rclass.subclasses():
 				return False
-		return True
+		return obj.bits >= self.bits
 	def type(self):
 		return self.rclass or asia
+	def bitOn(self, bit):
+		self.bits.add(bit)
+		return self
+	def bitOff(self, bit):
+		if bit in self.bits:
+			self.bits.remove(bit)
+		return self
 
 def defineClass(name, superclass):
 	_defineClass(tokensToString(name), nameToCode(name, rbits={"nimento", "yksikkö"}), superclass)
@@ -211,6 +230,7 @@ ei_mikään = asia.newInstance()
 pgl(".EXPR-%d ::= ei-mikään{$} -> ei-mikään" % (asia.id,), FuncOutput(lambda: ei_mikään))
 
 merkkijono = _defineClass("merkkijono", "merkkijono{$}", asia)
+pgl('.EXPR-%d ::= " .STR-CONTENT " -> "$1"' % (asia.id,), FuncOutput(lambda x: merkkijono.newInstance().setExtra("str", x)))
 pgl('.EXPR-%d ::= " .STR-CONTENT " -> "$1"' % (merkkijono.id,), FuncOutput(lambda x: merkkijono.newInstance().setExtra("str", x)))
 
 # Ominaisuudet
@@ -230,17 +250,31 @@ def defineField(owner, name, vtype, case="nimento"):
 	def setDefaultValue(clazz, defa):
 		clazz.fields[name_str].default_value = defa
 	pgl(".FIELD-DEFAULT-DEF-%d ::= .CLASS-%d{omanto} %s on yleensä .EXPR-%d . -> $1.%s defaults $2" % (
-		field.id, owner.id, nameToCode(name, {"nimento"}, rbits={case, "yksikkö"}), vtype.id, name_str
+		field.id, owner.id, nameToCode(name, {"yksikkö", "nimento"}, rbits={case, "yksikkö"}), vtype.id, name_str
 	), FuncOutput(setDefaultValue))
 	pgl(".DEF ::= .FIELD-DEFAULT-DEF-%d -> $1" % (field.id,), identity)
 	
 	pgl(".CMD ::= .EXPR-%d{omanto} %s on nyt .EXPR-%d . -> $1.%s = $2" % (
-		owner.id, nameToCode(name, {"nimento"}, rbits={case, "yksikkö"}), vtype.id, name
+		owner.id, nameToCode(name, {"yksikkö", "nimento"}, rbits={case, "yksikkö"}), vtype.id, name
 	), FuncOutput(lambda obj, val: obj.set(name_str, val)))
 
 pgl(".FIELD-DEF ::= .CLASS{ulkoolento} on .* , joka on .CLASS{nimento} . -> $1.$2 : $3", FuncOutput(defineField))
 pgl(".FIELD-DEF ::= .CLASS{ulkoolento} on .* kutsuttu .CLASS{nimento} . -> $1.$2 : $3", FuncOutput(lambda *x: defineField(*x, case="tulento")))
 pgl(".DEF ::= .FIELD-DEF -> $1", identity)
+
+# Adjektiivit
+
+def defineBit(owner, name):
+	name_str = tokensToString(name, {"yksikkö", "nimento"})
+	name_code = nameToCode(name, rbits={"yksikkö", "nimento"})
+	pgl(".PATTERN-%d ::= %s .PATTERN-%d{$} -> %s($1)" % (owner.id, name_code, owner.id, name_str), FuncOutput(lambda p: p.bitOn(name_str)))
+	
+	pgl(".CMD ::= .EXPR-%d{nimento} on nyt %s . -> $1.%s = $2" % (
+		owner.id, nameToCode(name, bits={"yksikkö", "nimento"}, rbits={"yksikkö", "nimento"}), name_str
+	), FuncOutput(lambda obj: obj.bitOn(name_str)))
+
+pgl(".ENUM-DEF ::= .CLASS{nimento} voi olla .* . -> $1 has bit $2", FuncOutput(defineBit))
+pgl(".DEF ::= .ENUM-DEF -> $1", identity)
 
 # Muuttujat
 
@@ -276,7 +310,7 @@ def setVar(name, val):
 
 def defineVariable(name, vtype):
 	name_str = tokensToString(name)
-	SCOPE[-1].variables[name_str] = vtype.newInstance()
+	SCOPE[-1].variables[name_str] = vtype.newInstance(name_str)
 	for clazz in vtype.superclasses():
 		pgl(".EXPR-%d ::= %s -> %s" % (clazz.id, nameToCode(name, rbits={"yksikkö", "nimento"}), name_str), FuncOutput(lambda: getVar(name_str)))
 	pgl(".CMD ::= %s on nyt EXPR-%d . -> %s = $1" % (nameToCode(name, {"nimento"}, rbits={"yksikkö", "nimento"}), vtype.id, name_str), FuncOutput(lambda x: setVar(name_str, x)))
@@ -370,7 +404,7 @@ def defineAction(name, params, pre, post):
 		), FuncOutput(lambda *groups: defineActionListener(separateGroups(groups, nameds), priority)))
 	
 	for p_pre, p_case, p_post, priority in LISTENER_PRIORITIES:
-		for nameds in itertools.product(*[[False, True]*len(params)]):
+		for nameds in itertools.product(*[[False, True]]*len(params)):
 			addListenerDefPattern(p_pre, p_case, p_post, priority, nameds)
 	pgl(".DEF ::= .LISTENER-DEF-%d -> $1" % (action.id,), identity)
 	
@@ -381,11 +415,11 @@ def defineAction(name, params, pre, post):
 				".EXPR-%d{%s,yksikkö} %s" % (a_class.id, cmd_case, tokensToCode(post))
 			for cmd_case, (_, a_class, _), post in zip(cmd_cases, params, posts)]),
 			name.token
-		), FuncOutput(lambda val: action.run([val])))
+		), FuncOutput(lambda *val: action.run(val)))
 	
 	def addCommandDefPhrase(cmd_cases):
 		cmd_pattern = " ".join([
-				"[ " + a_class.nameToCode({cmd_case, "yksikkö"}) + " .** ]"
+				"[ " + a_class.nameToCode({cmd_case, "yksikkö"}) + " ] .**"
 			for cmd_case, (_, a_class, _) in zip(cmd_cases, params)])
 		pgl(".COMMAND-DEF-%d ::= %s %s %s{-minen,omanto} %s komento on \" .** %s \" . -> def %s command" % (
 			action.id,
@@ -454,10 +488,32 @@ def parseBlock(file, grammar):
 			break
 		alternatives = grammar.matchAll(tokenize(line.strip()), "CMD", set())
 		if len(alternatives) != 1:
-			sys.stderr.write("Virhe jäsennettäessä riviä `" + line.strip() + "'. Vaihtoehdot: " + ", ".join([a[1] for a in alternatives]))
+			sys.stderr.write("Virhe jäsennettäessä riviä `" + line.strip() + "'. Vaihtoehdot: " + ", ".join([a[1] for a in alternatives]) + "\n")
 			break
 		ans.append(alternatives[0])
 	return ans
+
+# Tiedoston lataaminen
+
+def loadFile(file):
+	with open(file, "r") as f:
+		while True:
+			l = f.readline()
+			if not l:
+				break
+			if not l.strip():
+				continue
+			a = GRAMMAR.matchAll(tokenize(l.strip()), "DEF", set())
+			if len(a) == 1:
+				t = a[0][0]()
+				if a[0][1][-1] == ":":
+					t.parse(f)
+			else:
+				print("Virhe jäsennettäessä tiedoston riviä `" + l.strip() + "'.")
+# Standardikirjasto
+
+my_path = os.path.dirname(os.path.realpath(__file__))
+loadFile(os.path.join(my_path, "std.txt"))
 
 # Pääohjelma
 
@@ -534,7 +590,7 @@ def main():
 			args = line[6:].strip()
 			cat = args[:args.index(" ")]
 			expr = args[args.index(" ")+1:]
-			ints = matchAll(tokenize(expr), cat, set())
+			ints = GRAMMAR.matchAll(tokenize(expr), cat, set())
 			for _, string in ints:
 				print(string)
 			continue
@@ -542,21 +598,7 @@ def main():
 			print(eval(line[5:].strip()))
 			continue
 		elif line.startswith("/lataa"):
-			file = line[6:].strip()
-			with open(file, "r") as f:
-				while True:
-					l = f.readline()
-					if not l:
-						break
-					if not l.strip():
-						continue
-					a = GRAMMAR.matchAll(tokenize(l.strip()), "DEF", set())
-					if len(a) == 1:
-						t = a[0][0]()
-						if a[0][1][-1] == ":":
-							t.parse(f)
-					else:
-						print("Virhe jäsennettäessä tiedoston riviä `" + l.strip() + "'.")
+			loadFile(line[6:].strip())
 			printStatistics()
 			continue
 		del ERRORS[:]
