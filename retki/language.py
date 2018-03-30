@@ -15,6 +15,7 @@
 # along with this program. If not, see <http://www.gnu.org/licenses/>.
 
 import readline, os, sys
+import itertools
 from suomilog.patternparser import ERRORS, setDebug, PatternRef, Grammar
 from suomilog.finnish import tokenize, CASES
 
@@ -30,7 +31,7 @@ class AnyPattern:
 		return "<pattern that matches all strings without punctuation>"
 	def match(self, grammar, tokens, bits):
 		for token in tokens:
-			if token.token in [".", ",", ":", "!", "?"]:
+			if token.token in [".", ",", ":", "!", "?", "[", "]"]:
 				return []
 		return [[lambda: tokens, " ".join([t.token for t in tokens])]]
 	def allowsEmptyContent(self):
@@ -334,51 +335,102 @@ LISTENER_PRIORITIES = [
 
 ACTION_LISTENERS = []
 
-def defineAction(case, pre, rclass, post, name):
+def defineAction(name, params, pre, post):
 	action = RAction(name)
 	
-	def defineActionListener(pattern, name, priority):
-		listener = RListener(action, [(case, pattern, name)], priority)
+	def defineActionListener(patterns, priority):
+		listener = RListener(action, [(a_case, pattern, name) for (pattern, name), (_, _, a_case) in zip(patterns, params)], priority)
 		ACTION_LISTENERS.append(listener)
 		return listener
 	
+	def separateGroups(groups, nameds):
+		i = 0
+		j = 0
+		ans = []
+		while i < len(groups):
+			if nameds[j]:
+				ans.append((groups[i], groups[i+1]))
+				i += 2
+			else:
+				ans.append((groups[i], None))
+				i += 1
+			j += 1
+		return ans
+	
+	def addListenerDefPattern(p_pre, p_case, p_post, priority, nameds):
+		pgl(".LISTENER-DEF-%d ::= %s %s %s %s{-minen,%s} %s %s : -> def %s($1):" % (
+			action.id,
+			p_pre,
+			" ".join([
+				"%s .PATTERN-%d{%s,yksikkö}" % (tokensToCode(a_pre), a_class.id, a_case)
+				+ (" ( .* )" if named else "")
+			for named, (a_pre, a_class, a_case) in zip(nameds, params)]),
+			tokensToCode(pre), name.baseform("-minen"), p_case, tokensToCode(post), p_post,
+			name.token
+		), FuncOutput(lambda *groups: defineActionListener(separateGroups(groups, nameds), priority)))
+	
 	for p_pre, p_case, p_post, priority in LISTENER_PRIORITIES:
-		pgl(".LISTENER-DEF-%d ::= %s %s .PATTERN-%d{%s,yksikkö} %s %s{-minen,%s} %s : -> def %s($1):" % (
-			action.id, p_pre, tokensToCode(pre), rclass.id, case, tokensToCode(post), name.baseform("-minen"), p_case, p_post, name.token
-		), FuncOutput(lambda p: defineActionListener(p, None, priority)))
-		pgl(".LISTENER-DEF-%d ::= %s %s .PATTERN-%d{%s,yksikkö} ( .* ) %s %s{-minen,%s} %s : -> def %s($1):" % (
-			action.id, p_pre, tokensToCode(pre), rclass.id, case, tokensToCode(post), name.baseform("-minen"), p_case, p_post, name.token
-		), FuncOutput(lambda p, n: defineActionListener(p, nameToCode(n), priority)))
+		for nameds in itertools.product(*[[False, True]*len(params)]):
+			addListenerDefPattern(p_pre, p_case, p_post, priority, nameds)
 	pgl(".DEF ::= .LISTENER-DEF-%d -> $1" % (action.id,), identity)
 	
-	def defineCommand(pre, post, cmd_case):
-		pgl(".CMD ::= %s .EXPR-%d{%s,yksikkö} %s . -> %s($1)" % (
-			tokensToCode(pre), rclass.id, cmd_case, tokensToCode(post), name.token
+	def defineCommand(cmd_cases, pre, *posts):
+		pgl(".CMD ::= %s %s . -> %s($1)" % (
+			tokensToCode(pre),
+			" ".join([
+				".EXPR-%d{%s,yksikkö} %s" % (a_class.id, cmd_case, tokensToCode(post))
+			for cmd_case, (_, a_class, _), post in zip(cmd_cases, params, posts)]),
+			name.token
 		), FuncOutput(lambda val: action.run([val])))
 	
-	def addCommandDefPhrase(cmd_case):
-		pgl(".COMMAND-DEF-%d ::= %s %s %s %s{-minen,omanto} komento on \" .** [ %s ] .** \" . -> def %s command" % (
-			action.id, tokensToCode(pre), rclass.nameToCode({case,"yksikkö"}), tokensToCode(post), name.baseform("-minen"),
-			rclass.nameToCode({cmd_case,"yksikkö"}), name.token
-		), FuncOutput(lambda pre, post: defineCommand(pre, post, cmd_case)))
-		if len(pre) + len(post) != 0:
-			pgl(".COMMAND-DEF-%d ::= %s %s %s{-minen,omanto} komento on \" .** [ %s ] .** \" . -> def %s command" % (
-				action.id, tokensToCode(pre), tokensToCode(post), name.baseform("-minen"), rclass.nameToCode({cmd_case,"yksikkö"}), name.token
-			), FuncOutput(lambda pre, post: defineCommand(pre, post, cmd_case)))
-		pgl(".COMMAND-DEF-%d ::= %s{-minen,omanto} komento on \" .** [ %s ] .** \" . -> def %s command" % (
-			action.id, name.baseform("-minen"), rclass.nameToCode({cmd_case,"yksikkö"}), name.token
-		), FuncOutput(lambda pre, post: defineCommand(pre, post, cmd_case)))
+	def addCommandDefPhrase(cmd_cases):
+		cmd_pattern = " ".join([
+				"[ " + a_class.nameToCode({cmd_case, "yksikkö"}) + " .** ]"
+			for cmd_case, (_, a_class, _) in zip(cmd_cases, params)])
+		pgl(".COMMAND-DEF-%d ::= %s %s %s{-minen,omanto} %s komento on \" .** %s \" . -> def %s command" % (
+			action.id,
+			" ".join([
+				tokensToCode(a_pre) + a_class.nameToCode({a_case, "yksikkö"})
+			for a_pre, a_class, a_case in params]),
+			tokensToCode(pre), name.baseform("-minen"), tokensToCode(post),
+			cmd_pattern,
+			name.token
+		), FuncOutput(lambda *p: defineCommand(cmd_cases, *p)))
+		if sum([len(a_pre) for a_pre, _, _ in params]) + len(pre) + len(post) != 0:
+			pgl(".COMMAND-DEF-%d ::= %s %s %s{-minen,omanto} %s komento on \" .** %s \" . -> def %s command" % (
+				action.id,
+				" ".join([tokensToCode(a_pre) for a_pre, _, _ in params]),
+				tokensToCode(pre), name.baseform("-minen"), tokensToCode(post),
+				cmd_pattern,
+				name.token
+			), FuncOutput(lambda *p: defineCommand(cmd_cases, *p)))
+		pgl(".COMMAND-DEF-%d ::= %s %s{-minen,omanto} %s komento on \" .** %s \" . -> def %s command" % (
+			action.id,
+			tokensToCode(pre), name.baseform("-minen"), tokensToCode(post),
+			cmd_pattern,
+			name.token
+		), FuncOutput(lambda *p: defineCommand(cmd_cases, *p)))
 	
-	for cmd_case in CASES:
-		addCommandDefPhrase(cmd_case)
+	for cmd_cases in itertools.product(*[CASES]*len(params)):
+		addCommandDefPhrase(cmd_cases)
+	
 	pgl(".DEF ::= .COMMAND-DEF-%d -> $1" % (action.id,), identity)
 
-def addActionDefPattern(case):
-	pgl(".ACTION-DEF ::= .** [ .CLASS{%s,yksikkö} ] .** ..{-minen,nimento} on toiminto . -> action $4($2:%s)" % (case,case),
-		FuncOutput(lambda *x: defineAction(case, *x)))
+def addActionDefPattern(cases):
+	def transformArgs(args):
+		ans = []
+		for case, i in zip(cases, range(0, len(cases)*2, 2)):
+			ans.append((args[i], args[i+1], case))
+		return args[i+3], ans, args[i+2], args[i+4]
+	pgl(".ACTION-DEF ::= %s .** ..{-minen,nimento} .** on toiminto . -> action $%d(%d)" % (
+		" ".join([".** [ .CLASS{%s,yksikkö} ]" % (case,) for case in cases]),
+		len(cases)*2+2,
+		len(cases)
+	), FuncOutput(lambda *p: defineAction(*transformArgs(p))))
 
-for case in CASES:
-	addActionDefPattern(case)
+for i in [0,1,2]:
+	for cases in itertools.product(*[CASES]*i):
+		addActionDefPattern(cases)
 
 pgl(".DEF ::= .ACTION-DEF -> $1", identity)
 
@@ -412,9 +464,20 @@ def parseBlock(file, grammar):
 def main():
 	def complete_file(t, s):
 		path, file = os.path.split(t)
-		for i, f in enumerate(filter(lambda f: f.startswith(file), os.listdir(path or "."))):
-			if i == s:
-				return os.path.join(path, f)
+		alternatives = []
+		try:
+			for c in sorted(["/kielioppi", "/käsitteet", "/debug", "/virheet", "/match", "/eval", "/lataa"]):
+				if c.startswith(t):
+					alternatives.append(c)
+			for f in filter(lambda f: f.startswith(file), os.listdir(path or ".")):
+				alt = os.path.join(path, f)
+				if os.path.isdir(alt):
+					alternatives.append(os.path.join(alt, ""))
+				else:
+					alternatives.append(alt)
+			return alternatives[s] if s < len(alternatives) else None
+		except Exception as e:
+			print(e)
 	readline.set_completer(complete_file)
 	readline.set_completer_delims(" ")
 	readline.parse_and_bind('tab: complete')
@@ -485,6 +548,8 @@ def main():
 					l = f.readline()
 					if not l:
 						break
+					if not l.strip():
+						continue
 					a = GRAMMAR.matchAll(tokenize(l.strip()), "DEF", set())
 					if len(a) == 1:
 						t = a[0][0]()
