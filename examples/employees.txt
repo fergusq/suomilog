@@ -33,7 +33,7 @@
 .COMPANY-PATTERN ::= .COMPANY-PATTERN{$} joka .COMPANY-S -> $1.$2
 .COMPANY-PATTERN ::= .COMPANY-PATTERN{$} jonka .COMPANY-P -> $1.$2
 
-.COMPANY-PATTERN ::= .HUMAN-PATTERN{omanto} työnantaja{$} -> $1.ceo
+.COMPANY-PATTERN ::= .HUMAN-PATTERN{omanto} työnantaja{$} -> $1.employer
 
 .COMPANY-ADJ ::= suuri{$} -> Large
 .COMPANY-ADJ ::= pieni{$} -> Small
