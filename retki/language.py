@@ -14,23 +14,50 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <http://www.gnu.org/licenses/>.
 
-import readline, os
-from suomilog.patternparser import PATTERNS, setDebug, PatternRef, parseGrammarLine as pgl, matchAll
-from suomilog.finnish import tokenize
+import readline, os, sys
+from suomilog.patternparser import ERRORS, setDebug, PatternRef, Grammar
+from suomilog.finnish import tokenize, CASES
+
+GRAMMAR = Grammar()
+pgl = GRAMMAR.parseGrammarLine
 
 class AnyPattern:
+	def __init__(self, allow_empty):
+		self.allow_empty = allow_empty
 	def __repr__(self):
 		return "AnyPattern()"
 	def toCode(self):
 		return "<pattern that matches all strings without punctuation>"
-	def match(self, tokens, bits):
+	def match(self, grammar, tokens, bits):
 		for token in tokens:
 			if token.token in [".", ",", ":", "!", "?"]:
 				return []
 		return [[lambda: tokens, " ".join([t.token for t in tokens])]]
+	def allowsEmptyContent(self):
+		return self.allow_empty
 
-PATTERNS["*"] = [
-	AnyPattern()
+GRAMMAR.patterns["*"] = [
+	AnyPattern(False)
+]
+
+GRAMMAR.patterns["**"] = [
+	AnyPattern(True)
+]
+
+class WordPattern:
+	def __repr__(self):
+		return "WordPattern()"
+	def toCode(self):
+		return "<pattern that matches any single token>"
+	def match(self, grammar, tokens, bits):
+		if len(tokens) != 1:
+			return []
+		return [[lambda: tokens[0], tokens[0].token]]
+	def allowsEmptyContent(self):
+		return False
+
+GRAMMAR.patterns["."] = [
+	WordPattern()
 ]
 
 class StringContentPattern:
@@ -38,14 +65,16 @@ class StringContentPattern:
 		return "StringContentPattern()"
 	def toCode(self):
 		return "<pattern that matches all strings without quote marks>"
-	def match(self, tokens, bits):
+	def match(self, grammar, tokens, bits):
 		for token in tokens:
 			if token.token == '"':
 				return []
 		string = " ".join([t.token for t in tokens])
 		return [[lambda: string, string]]
+	def allowsEmptyContent(self):
+		return True
 
-PATTERNS["STR-CONTENT"] = [
+GRAMMAR.patterns["STR-CONTENT"] = [
 	StringContentPattern()
 ]
 
@@ -81,6 +110,9 @@ def tokensToString(tokens, rbits={"nimento"}):
 def nameToCode(name, bits=None, rbits={"nimento"}):
 	return " ".join([token + ("{" + ",".join(tbits) + "}" if tbits else "") for token, tbits in nameToBaseform(name, bits, rbits)])
 
+def tokensToCode(tokens):
+	return " ".join([token.toCode() for token in tokens])
+
 # Luokat
 
 counter = 0
@@ -94,6 +126,8 @@ class RObject:
 		if field_name not in self.data:
 			self.data[field_name] = self.rclass.fields[field_name].default_value
 		return self.data[field_name]
+	def set(self, field_name, val):
+		self.data[field_name] = val
 	def setExtra(self, name, data):
 		self.extra[name] = data
 		return self
@@ -101,12 +135,13 @@ class RObject:
 		return "[eräs " + self.rclass.name + "]"
 
 class RClass:
-	def __init__(self, name, superclass):
+	def __init__(self, name, superclass, name_tokens):
 		global counter
 		counter += 1
 		
 		self.id = counter
 		self.name = name
+		self.name_tokens = name_tokens
 		self.superclass = superclass
 		self.direct_subclasses = []
 		self.fields = {}
@@ -125,7 +160,11 @@ class RClass:
 		for subclass in self.direct_subclasses:
 			ans += subclass.subclasses()
 		return ans
-
+	def nameToCode(self, bits):
+		if self.name_tokens:
+			return nameToCode(name_tokens, rbits={"nimento", "yksikkö"}, bits=bits)
+		else:
+			return self.name + "{" + ",".join(bits) + "}"
 class RField:
 	def __init__(self, counter, name, vtype, defa=None):
 		self.id = counter
@@ -135,15 +174,27 @@ class RField:
 	def copy(self):
 		return RField(self.counter, self.name, self.vtype, self.default_value)
 
+class RPattern:
+	def __init__(self, rclass=None):
+		self.rclass = rclass
+	def matches(self, obj):
+		if self.rclass:
+			if obj.rclass not in self.rclass.subclasses():
+				return False
+		return True
+	def type(self):
+		return self.rclass or asia
+
 def defineClass(name, superclass):
-	_defineClass(tokensToString(name), nameToCode(name), superclass)
-def _defineClass(name_str, name_code, superclass):
-	rclass = RClass(name_str, superclass)
+	_defineClass(tokensToString(name), nameToCode(name, rbits={"nimento", "yksikkö"}), superclass)
+def _defineClass(name_str, name_code, superclass, name_tokens=None):
+	rclass = RClass(name_str, superclass, name_tokens)
 	for clazz in reversed(superclass.superclasses()) if superclass else []:
 		for fname in clazz.fields:
 			rclass.fields[fname] = clazz.fields[fname].copy()
 	for clazz in rclass.superclasses():
 		pgl(".CLASS-%d ::= %s -> %s" % (clazz.id, name_code, name_str), FuncOutput(lambda: rclass))
+		pgl(".PATTERN-%d ::= %s -> %s" % (clazz.id, name_code, name_str), FuncOutput(lambda: RPattern(rclass=rclass)))
 	pgl(".CLASS ::= %s -> %s" % (name_code, name_str), FuncOutput(lambda: rclass))
 	return rclass
 
@@ -167,17 +218,24 @@ def defineField(owner, name, vtype, case="nimento"):
 	name_str = tokensToString(name, {"yksikkö", case})
 	global counter
 	counter += 1
+	
 	for clazz in owner.subclasses():
 		field = RField(counter, name_str, vtype)
 		clazz.fields[name_str] = field
+	
 	for clazz in vtype.superclasses():
-		pgl(".EXPR-%d ::= .EXPR-%d{omanto} %s -> $1.%s" % (clazz.id, owner.id, nameToCode(name, rbits={"nimento", "yksikkö"}), name_str), FuncOutput(lambda obj: obj.get(name_str)))
+		pgl(".EXPR-%d ::= .EXPR-%d{omanto} %s -> $1.%s" % (clazz.id, owner.id, nameToCode(name, rbits={case, "yksikkö"}), name_str), FuncOutput(lambda obj: obj.get(name_str)))
+	
 	def setDefaultValue(clazz, defa):
 		clazz.fields[name_str].default_value = defa
 	pgl(".FIELD-DEFAULT-DEF-%d ::= .CLASS-%d{omanto} %s on yleensä .EXPR-%d . -> $1.%s defaults $2" % (
 		field.id, owner.id, nameToCode(name, {"nimento"}, rbits={case, "yksikkö"}), vtype.id, name_str
-		), FuncOutput(setDefaultValue))
+	), FuncOutput(setDefaultValue))
 	pgl(".DEF ::= .FIELD-DEFAULT-DEF-%d -> $1" % (field.id,), identity)
+	
+	pgl(".CMD ::= .EXPR-%d{omanto} %s on nyt .EXPR-%d . -> $1.%s = $2" % (
+		owner.id, nameToCode(name, {"nimento"}, rbits={case, "yksikkö"}), vtype.id, name
+	), FuncOutput(lambda obj, val: obj.set(name_str, val)))
 
 pgl(".FIELD-DEF ::= .CLASS{ulkoolento} on .* , joka on .CLASS{nimento} . -> $1.$2 : $3", FuncOutput(defineField))
 pgl(".FIELD-DEF ::= .CLASS{ulkoolento} on .* kutsuttu .CLASS{nimento} . -> $1.$2 : $3", FuncOutput(lambda *x: defineField(*x, case="tulento")))
@@ -185,16 +243,144 @@ pgl(".DEF ::= .FIELD-DEF -> $1", identity)
 
 # Muuttujat
 
-VARIABLES = {}
+class RScope:
+	def __init__(self, supers):
+		self.variables = {}
+		self.superscope = supers
+		self.bits = set()
+	def bitOn(self, bit):
+		self.bits.add(bit)
+	def bitOff(self, bit):
+		if bit in self.bits:
+			self.bits.remove(bit)
+
+SCOPE = [RScope(None)]
+
+def pushScope():
+	SCOPE.append(RScope(SCOPE[-1]))
+def popScope():
+	SCOPE.pop()
+def getVar(name):
+	for scope in reversed(SCOPE):
+		if name in scope.variables:
+			return scope.variables[name]
+	return None
+def setVar(name, val):
+	for scope in reversed(SCOPE):
+		if name in scope.variables:
+			scope.variables[name] = val
+			break
+	else:
+		SCOPE[-1].variables[name] = val
 
 def defineVariable(name, vtype):
 	name_str = tokensToString(name)
-	VARIABLES[name_str] = vtype.newInstance()
+	SCOPE[-1].variables[name_str] = vtype.newInstance()
 	for clazz in vtype.superclasses():
-		pgl(".EXPR-%d ::= %s -> %s" % (clazz.id, nameToCode(name), name_str), FuncOutput(lambda: VARIABLES[name_str]))
+		pgl(".EXPR-%d ::= %s -> %s" % (clazz.id, nameToCode(name, rbits={"yksikkö", "nimento"}), name_str), FuncOutput(lambda: getVar(name_str)))
+	pgl(".CMD ::= %s on nyt EXPR-%d . -> %s = $1" % (nameToCode(name, {"nimento"}, rbits={"yksikkö", "nimento"}), vtype.id, name_str), FuncOutput(lambda x: setVar(name_str, x)))
 
 pgl(".VARIABLE-DEF ::= .* on .CLASS{nimento} . -> $1 : $2", FuncOutput(defineVariable))
 pgl(".DEF ::= .VARIABLE-DEF -> $1", identity)
+
+# Toiminnot
+
+class RAction:
+	def __init__(self, name):
+		global counter
+		counter += 1
+		self.id = counter
+		self.name = name
+	def run(self, args):
+		listeners = []
+		for listener in ACTION_LISTENERS:
+			if listener.action is self and all([p.matches(obj) for obj, (_, p, _) in zip(args, listener.params)]):
+				listeners.append(listener)
+		for listener in sorted(listeners, key=lambda l: l.priority):
+			listener.run(args)
+			if "stop action" in SCOPE[-1].bits:
+				break
+
+class RListener:
+	def __init__(self, action, params, priority):
+		self.action = action
+		self.params = params
+		self.priority = priority
+		self.grammar = GRAMMAR.copy()
+	def parse(self, file):
+		for c, p, n in self.params:
+			self.createParamPhrases(c, p, n)
+		self.grammar.parseGrammarLine(".CMD ::= keskeytä toiminto . -> stop", FuncOutput(lambda: SCOPE[-2].bitOn("stop action"))) # suoritetaan isäntäscopessa
+		self.body = parseBlock(file, self.grammar)
+	def createParamPhrases(self, c, p, n):
+		vtype = p.type()
+		if n:
+			self.grammar.parseGrammarLine(".EXPR-%d ::= %s -> %s param" % (vtype.id, n, vtype.name), FuncOutput(lambda: getVar("_"+c)))
+		else:
+			self.grammar.parseGrammarLine(".EXPR-%d ::= se{$} -> %s param" % (vtype.id, vtype.name), FuncOutput(lambda: getVar("_"+c)))
+	def run(self, args):
+		pushScope()
+		for (c, _, _), a in zip(self.params, args):
+			SCOPE[-1].variables["_"+c] = a
+		for cmd in self.body:
+			cmd[0]()
+		popScope()
+
+LISTENER_PRIORITIES = [
+	("ennen", "osanto", "", 20),
+	("", "omanto", "aikana", 50),
+	("", "omanto", "jälkeen", 50),
+]
+
+ACTION_LISTENERS = []
+
+def defineAction(case, pre, rclass, post, name):
+	action = RAction(name)
+	
+	def defineActionListener(pattern, name, priority):
+		listener = RListener(action, [(case, pattern, name)], priority)
+		ACTION_LISTENERS.append(listener)
+		return listener
+	
+	for p_pre, p_case, p_post, priority in LISTENER_PRIORITIES:
+		pgl(".LISTENER-DEF-%d ::= %s %s .PATTERN-%d{%s,yksikkö} %s %s{-minen,%s} %s : -> def %s($1):" % (
+			action.id, p_pre, tokensToCode(pre), rclass.id, case, tokensToCode(post), name.baseform("-minen"), p_case, p_post, name.token
+		), FuncOutput(lambda p: defineActionListener(p, None, priority)))
+		pgl(".LISTENER-DEF-%d ::= %s %s .PATTERN-%d{%s,yksikkö} ( .* ) %s %s{-minen,%s} %s : -> def %s($1):" % (
+			action.id, p_pre, tokensToCode(pre), rclass.id, case, tokensToCode(post), name.baseform("-minen"), p_case, p_post, name.token
+		), FuncOutput(lambda p, n: defineActionListener(p, nameToCode(n), priority)))
+	pgl(".DEF ::= .LISTENER-DEF-%d -> $1" % (action.id,), identity)
+	
+	def defineCommand(pre, post, cmd_case):
+		pgl(".CMD ::= %s .EXPR-%d{%s,yksikkö} %s . -> %s($1)" % (
+			tokensToCode(pre), rclass.id, cmd_case, tokensToCode(post), name.token
+		), FuncOutput(lambda val: action.run([val])))
+	
+	def addCommandDefPhrase(cmd_case):
+		pgl(".COMMAND-DEF-%d ::= %s %s %s %s{-minen,omanto} komento on \" .** [ %s ] .** \" . -> def %s command" % (
+			action.id, tokensToCode(pre), rclass.nameToCode({case,"yksikkö"}), tokensToCode(post), name.baseform("-minen"),
+			rclass.nameToCode({cmd_case,"yksikkö"}), name.token
+		), FuncOutput(lambda pre, post: defineCommand(pre, post, cmd_case)))
+		if len(pre) + len(post) != 0:
+			pgl(".COMMAND-DEF-%d ::= %s %s %s{-minen,omanto} komento on \" .** [ %s ] .** \" . -> def %s command" % (
+				action.id, tokensToCode(pre), tokensToCode(post), name.baseform("-minen"), rclass.nameToCode({cmd_case,"yksikkö"}), name.token
+			), FuncOutput(lambda pre, post: defineCommand(pre, post, cmd_case)))
+		pgl(".COMMAND-DEF-%d ::= %s{-minen,omanto} komento on \" .** [ %s ] .** \" . -> def %s command" % (
+			action.id, name.baseform("-minen"), rclass.nameToCode({cmd_case,"yksikkö"}), name.token
+		), FuncOutput(lambda pre, post: defineCommand(pre, post, cmd_case)))
+	
+	for cmd_case in CASES:
+		addCommandDefPhrase(cmd_case)
+	pgl(".DEF ::= .COMMAND-DEF-%d -> $1" % (action.id,), identity)
+
+def addActionDefPattern(case):
+	pgl(".ACTION-DEF ::= .** [ .CLASS{%s,yksikkö} ] .** ..{-minen,nimento} on toiminto . -> action $4($2:%s)" % (case,case),
+		FuncOutput(lambda *x: defineAction(case, *x)))
+
+for case in CASES:
+	addActionDefPattern(case)
+
+pgl(".DEF ::= .ACTION-DEF -> $1", identity)
 
 # Tulostaminen
 
@@ -205,6 +391,21 @@ def printCommand(value):
 		print(value.asString())
 
 pgl(".CMD ::= sano .EXPR-%d{nimento} . -> print($1)" % (asia.id,), FuncOutput(printCommand))
+
+# Komentojen jäsentäminen
+
+def parseBlock(file, grammar):
+	ans = []
+	while True:
+		line = file.readline()
+		if not line.strip():
+			break
+		alternatives = grammar.matchAll(tokenize(line.strip()), "CMD", set())
+		if len(alternatives) != 1:
+			sys.stderr.write("Virhe jäsennettäessä riviä `" + line.strip() + "'. Vaihtoehdot: " + ", ".join([a[1] for a in alternatives]))
+			break
+		ans.append(alternatives[0])
+	return ans
 
 # Pääohjelma
 
@@ -217,10 +418,17 @@ def main():
 	readline.set_completer(complete_file)
 	readline.set_completer_delims(" ")
 	readline.parse_and_bind('tab: complete')
-
+	
+	def printGrammar(grammar):
+		for category in sorted(grammar.patterns):
+			print(category, "::=")
+			for pattern in grammar.patterns[category]:
+				print(" " + pattern.toCode())
+	
 	def printStatistics():
-		n_patterns = sum([len(category) for category in PATTERNS.values()])
+		n_patterns = sum([len(category) for category in GRAMMAR.patterns.values()])
 		print("Ladattu", n_patterns, "fraasia.")
+	
 	printStatistics()
 	while True:
 		try:
@@ -230,10 +438,7 @@ def main():
 		if not line:
 			continue
 		if line == "/kielioppi":
-			for category in sorted(PATTERNS):
-				print(category, "::=")
-				for pattern in PATTERNS[category]:
-					print(" " + pattern.toCode())
+			printGrammar(GRAMMAR)
 			continue
 		elif line == "/käsitteet":
 			def printClass(clazz, indent):
@@ -254,25 +459,47 @@ def main():
 		elif line == "/debug 3":
 			setDebug(3)
 			continue
+		elif line == "/virheet":
+			if len(ERRORS) > 0:
+				print("Mahdollisia virheitä:")
+				for error in ERRORS:
+					print(error+"\n")
+			else:
+				print("Ei virheitä.")
+			continue
+		elif line.startswith("/match"):
+			args = line[6:].strip()
+			cat = args[:args.index(" ")]
+			expr = args[args.index(" ")+1:]
+			ints = matchAll(tokenize(expr), cat, set())
+			for _, string in ints:
+				print(string)
+			continue
 		elif line.startswith("/eval"):
 			print(eval(line[5:].strip()))
 			continue
 		elif line.startswith("/lataa"):
 			file = line[6:].strip()
-			with open(file) as f:
-				for l in f:
-					a = matchAll(tokenize(l.strip()), "DEF", set())
+			with open(file, "r") as f:
+				while True:
+					l = f.readline()
+					if not l:
+						break
+					a = GRAMMAR.matchAll(tokenize(l.strip()), "DEF", set())
 					if len(a) == 1:
-						a[0][0]()
+						t = a[0][0]()
+						if a[0][1][-1] == ":":
+							t.parse(f)
 					else:
-						print("Virhe ladattaessa tiedostoa.")
+						print("Virhe jäsennettäessä tiedoston riviä `" + l.strip() + "'.")
 			printStatistics()
 			continue
+		del ERRORS[:]
 		phrase_type = "DEF"
 		if line[0] == "!":
 			phrase_type = "CMD"
 			line = line[1:]
-		interpretations = matchAll(tokenize(line), phrase_type, set())
+		interpretations = GRAMMAR.matchAll(tokenize(line), phrase_type, set())
 		if len(interpretations) == 0:
 			print("Ei tulkintaa.")
 		elif len(interpretations) == 1:
