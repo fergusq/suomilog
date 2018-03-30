@@ -19,6 +19,8 @@ import readline, os
 from suomilog.patternparser import *
 from suomilog.finnish import tokenize
 
+grammar = Grammar()
+
 query = Pattern("QUERY", [
 	Token("hae", []),
 	Token("jokainen", []),
@@ -29,9 +31,9 @@ path = os.path.dirname(os.path.realpath(__file__))
 with open(os.path.join(path, "employees.txt")) as file:
 	for line in file:
 		if "::=" in line:
-			parseGrammarLine(line.replace("\n", ""))
+			grammar.parseGrammarLine(line.replace("\n", ""))
 
-n_patterns = sum([len(category) for category in PATTERNS.values()])
+n_patterns = sum([len(category) for category in grammar.patterns.values()])
 print("Ladattu", n_patterns, "fraasia.")
 
 while True:
@@ -45,15 +47,20 @@ while True:
 	elif line[0] == ".":
 		line = line.replace("\t", " ")
 		tokens = line.split(" ")
-		if len(tokens) == 1 and tokens[0][1:] in PATTERNS:
-			print(PATTERNS[tokens[0][1:]])
+		if len(tokens) == 1 and tokens[0][1:] in grammar.patterns:
+			print(grammar.patterns[tokens[0][1:]])
 		elif len(tokens) > 2 and tokens[1] == "::=" and "->" in tokens:
-			parseGrammarLine(line)
+			grammar.parseGrammarLine(line)
 		else:
 			print("Kategoriat:")
-			for cat in PATTERNS:
+			for cat in grammar.patterns:
 				print(cat)
 	else:
+		del ERRORS[:]
 		tokens = tokenize(line)
-		for alt in query.match(tokens, set()):
+		alternatives = query.match(grammar, tokens, set())
+		for alt in alternatives:
 			print(alt)
+		if len(alternatives) == 0:
+			for error in ERRORS:
+				print(error+"\n")

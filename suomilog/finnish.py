@@ -37,7 +37,17 @@ def baseformAndBits(word):
 	addBits(word, bits, "SIJAMUOTO")
 	addBits(word, bits, "CLASS")
 	addBits(word, bits, "PARTICIPLE")
-	addBits(word, bits, "MOOD", {"MINEN-infinitive": "-minen", "MA-infinitive": "-ma", "E-infinitive": "-e", "A-infinitive": "-a"})
+	addBits(word, bits, "PERSON")
+	addBits(word, bits, "MOOD", {
+		"MINEN-infinitive": "-minen",
+		"MA-infinitive": "-ma",
+		"E-infinitive": "-e",
+		"A-infinitive": "-a",
+		"imperative": "imperatiivi",
+		"indicative": "indikatiivi",
+		"conditional": "konditionaali",
+		"potential": "potentiaali"
+	})
 	return word["BASEFORM"], bits
 
 def addBits(word, bits, name, table=None):
@@ -47,3 +57,18 @@ def addBits(word, bits, name, table=None):
 				bits.add(table[word[name]])
 		else:
 			bits.add(word[name])
+
+CASES = [
+	"nimento",
+	"omanto",
+	"osanto",
+	"olento",
+	"tulento",
+	"ulkoolento",
+	"ulkotulento",
+	"ulkoeronto",
+	"sisäolento",
+	"sisätulento",
+	"sisäeronto",
+	"vajanto"
+]
