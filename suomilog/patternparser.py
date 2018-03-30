@@ -157,7 +157,7 @@ class Pattern:
 	def __repr__(self):
 		return "Pattern(" + repr(self.name) + ", " + repr(self.words) + ", " + repr(self.output) + ")"
 	def toCode(self):
-		return " ".join([w.toCode() for w in self.words]) + " -> " + repr(self.output)
+		return " ".join([w.toCode() for w in self.words])# + " -> " + repr(self.output)
 	def allowsEmptyContent(self):
 		return False
 	def match(self, grammar, tokens, bits, i=0, j=0, g=None):
