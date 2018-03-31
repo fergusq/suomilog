@@ -1,0 +1,100 @@
+Pelin alkaminen on toiminto.
+Pelin alkamisen komento on "peli alkaa".
+
+> Huoneet
+
+Huone on käsite.
+Huoneella on kuvaukseksi kutsuttu merkkijono.
+Huone on joko avoin tai suljettu.
+Huone on yleensä avoin.
+
+Seinä on suljettu huone.
+Seinän kuvaus on "Melko tavallinen seinä".
+
+Huoneella on pohjoisnaapuriksi kutsuttu huone.
+Huoneen pohjoisnaapuri on yleensä seinä.
+Huoneella on etelänaapuriksi kutsuttu huone.
+Huoneen etelänaapuri on yleensä seinä.
+
+> Ihminen, pelaaja
+
+Ihminen on käsite.
+Ihminen on yleensä inhimillinen.
+Ihmisellä on sijainti, joka on huone.
+Pelaaja on ihminen.
+
+> Kuvaileminen
+
+[Huoneen] kuvaileminen on toiminto.
+Kuvailemisen komento on "kuvaile [huonetta]".
+
+Huoneen kuvailemisen aikana:
+	Sano sen kuvaus.
+
+Suljetun huoneen kuvailemisen jälkeen:
+	Sano "Et näe ovea sinne.".
+
+> Katseleminen
+
+Katseleminen on toiminto.
+Katselemisen komento on "katsele".
+
+Katselemisen aikana:
+	Kuvaile pelaajan sijaintia.
+
+> Esitteleminen
+
+[Huoneen] esitteleminen on toiminto.
+Esittelemisen komento on "esittele [huone]".
+
+Huoneen esittelemisen aikana:
+	Sano "[sen nimi koodissa isolla alkukirjaimella][rivinvaihto]".
+	Kuvaile sitä.
+
+Pelin alkamisen jälkeen:
+	Esittele pelaajan sijainti.
+
+> Liikkuminen
+
+Pohjoiseen liikkuminen on toiminto.
+Pohjoiseen liikkumisen komento on "liiku pohjoiseen".
+Pohjoiseen liikkumisen komento on "mene pohjoiseen".
+Pohjoiseen liikkumisen komento on "pohjoiseen".
+
+Etelään liikkuminen on toiminto.
+Etelään liikkumisen komento on "liiku etelään".
+Etelään liikkumisen komento on "mene etelään".
+Etelään liikkumisen komento on "etelään".
+
+[Huoneeseen] siirtyminen on toiminto.
+Siirtymisen komento on "siirry [huoneeseen]".
+
+Pohjoiseen liikkumisen aikana:
+	Siirry pelaajan sijainnin pohjoisnaapuriin.
+
+Etelään liikkumisen aikana:
+	Siirry pelaajan sijainnin etelänaapuriin.
+
+Ennen suljettuun huoneeseen siirtymistä:
+	Sano "Et näe ovea.".
+	Keskeytä toiminto.
+
+Huoneeseen siirtymisen aikana:
+	Pelaajan sijainti on nyt se.
+
+Huoneeseen siirtymisen jälkeen:
+	Esittele se.
+
+> Kartta
+
+Eteinen on huone.
+Eteisen kuvaus on "Eteisessä on kenkiä ja takkeja, mutta ei juuri mitään kiinnostavaa.".
+
+Olohuone on huone.
+Olohuoneen kuvaus on "Olohuoneessa on pieni sohva ja kolme tuolia ja se tuntuu ahtaalta.".
+
+Eteisen pohjoisnaapuri on olohuone.
+Olohuoneen etelänaapuri on eteinen.
+
+Ennen pelin alkamista:
+	Pelaajan sijainti on nyt eteinen.
