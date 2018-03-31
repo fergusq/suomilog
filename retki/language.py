@@ -22,6 +22,8 @@ from suomilog.finnish import tokenize, CASES
 GRAMMAR = Grammar()
 pgl = GRAMMAR.parseGrammarLine
 
+# Villikortit
+
 class AnyPattern:
 	def __init__(self, allow_empty):
 		self.allow_empty = allow_empty
@@ -79,6 +81,8 @@ GRAMMAR.patterns["STR-CONTENT"] = [
 	StringContentPattern()
 ]
 
+# Ulostulo
+
 class FuncOutput:
 	def __init__(self, f):
 		self.func = f
@@ -86,6 +90,8 @@ class FuncOutput:
 		return lambda: self.func(*[arg() for arg in args])
 
 identity = FuncOutput(lambda x: x)
+
+# Apufunktiot
 
 def nameToBaseform(tokens, bits, rbits):
 	ans = []
@@ -114,16 +120,34 @@ def nameToCode(name, bits=None, rbits={"nimento"}):
 def tokensToCode(tokens):
 	return " ".join([token.toCode() for token in tokens])
 
+# Bittiluokka
+
+class Bits:
+	def __init__(self):
+		self.bits = set()
+	def bitOn(self, bit):
+		self.bits.add(bit)
+		return self
+	def bitOff(self, bit):
+		if bit in self.bits:
+			self.bits.remove(bit)
+		return self
+	def bitsOff(self, bits):
+		for bit in bits:
+			self.bitOff(bit)
+		return self
+
 # Luokat
 
 counter = 0
 
-class RObject:
-	def __init__(self, rclass, name):
+class RObject(Bits):
+	def __init__(self, rclass, name, bits=set()):
+		Bits.__init__(self)
 		self.rclass = rclass
 		self.data = {}
 		self.extra = {}
-		self.bits = set()
+		self.bits.update(bits)
 		self.name = name
 		if name:
 			self.data["nimi koodissa"] = merkkijono.newInstance().setExtra("str", name)
@@ -133,21 +157,17 @@ class RObject:
 		return self.data[field_name]
 	def set(self, field_name, val):
 		self.data[field_name] = val
-	def bitOn(self, bit):
-		self.bits.add(bit)
-		return self
-	def bitOff(self, bit):
-		if bit in self.bits:
-			self.bits.remove(bit)
-		return self
 	def setExtra(self, name, data):
 		self.extra[name] = data
 		return self
 	def asString(self):
+		if self.name:
+			return self.name
 		return "[eräs " + self.rclass.name + "]"
 
-class RClass:
+class RClass(Bits):
 	def __init__(self, name, superclass, name_tokens):
+		Bits.__init__(self)
 		global counter
 		counter += 1
 		
@@ -157,11 +177,12 @@ class RClass:
 		self.superclass = superclass
 		self.direct_subclasses = []
 		self.fields = {}
+		self.bit_groups = []
 		
 		if superclass:
 			self.superclass.direct_subclasses.append(self)
-	def newInstance(self, name=None):
-		return RObject(self, name)
+	def newInstance(self, name=None, bits=set()):
+		return RObject(self, name, self.bits|bits)
 	def superclasses(self):
 		if self.superclass == None:
 			return [self]
@@ -184,12 +205,12 @@ class RField:
 		self.type = vtype
 		self.default_value = defa or ei_mikään
 	def copy(self):
-		return RField(self.counter, self.name, self.vtype, self.default_value)
+		return RField(self.id, self.name, self.type, self.default_value)
 
-class RPattern:
+class RPattern(Bits):
 	def __init__(self, rclass=None):
+		Bits.__init__(self)
 		self.rclass = rclass
-		self.bits = set()
 	def matches(self, obj):
 		if self.rclass:
 			if obj.rclass not in self.rclass.subclasses():
@@ -197,24 +218,28 @@ class RPattern:
 		return obj.bits >= self.bits
 	def type(self):
 		return self.rclass or asia
-	def bitOn(self, bit):
-		self.bits.add(bit)
-		return self
-	def bitOff(self, bit):
-		if bit in self.bits:
-			self.bits.remove(bit)
-		return self
+
+CLASSES = {}
 
 def defineClass(name, superclass):
 	_defineClass(tokensToString(name), nameToCode(name, rbits={"nimento", "yksikkö"}), superclass)
 def _defineClass(name_str, name_code, superclass, name_tokens=None):
+	if name_str in CLASSES:
+		raise Exception("redefinition of class " + name_str)
 	rclass = RClass(name_str, superclass, name_tokens)
+	CLASSES[name_str] = rclass
 	for clazz in reversed(superclass.superclasses()) if superclass else []:
 		for fname in clazz.fields:
 			rclass.fields[fname] = clazz.fields[fname].copy()
+	pgl(".CLASS-PATTERN-%d ::= %s -> %s" % (rclass.id, name_code, name_str), FuncOutput(lambda: RPattern(rclass=rclass)))
+	pgl(".CLASS-PATTERN ::= .CLASS-PATTERN-%d{$} -> $1" % (rclass.id,), identity)
 	for clazz in rclass.superclasses():
 		pgl(".CLASS-%d ::= %s -> %s" % (clazz.id, name_code, name_str), FuncOutput(lambda: rclass))
 		pgl(".PATTERN-%d ::= %s -> %s" % (clazz.id, name_code, name_str), FuncOutput(lambda: RPattern(rclass=rclass)))
+		if clazz is not rclass:
+			for _, group_strs, group_codes in clazz.bit_groups:
+				for group_str, group_code in zip(group_strs, group_codes):
+					addBitPhrase(rclass, group_str, group_code, group_strs)
 	pgl(".CLASS ::= %s -> %s" % (name_code, name_str), FuncOutput(lambda: rclass))
 	return rclass
 
@@ -264,58 +289,100 @@ pgl(".DEF ::= .FIELD-DEF -> $1", identity)
 
 # Adjektiivit
 
-def defineBit(owner, name):
-	name_str = tokensToString(name, {"yksikkö", "nimento"})
-	name_code = nameToCode(name, rbits={"yksikkö", "nimento"})
-	pgl(".PATTERN-%d ::= %s .PATTERN-%d{$} -> %s($1)" % (owner.id, name_code, owner.id, name_str), FuncOutput(lambda p: p.bitOn(name_str)))
-	
-	pgl(".CMD ::= .EXPR-%d{nimento} on nyt %s . -> $1.%s = $2" % (
-		owner.id, nameToCode(name, bits={"yksikkö", "nimento"}, rbits={"yksikkö", "nimento"}), name_str
-	), FuncOutput(lambda obj: obj.bitOn(name_str)))
+def addBitPhrase(clazz, name_code, name_str, name_strs):
+	pgl(".PATTERN-%d ::= %s .PATTERN-%d{$} -> %s($1)" % (clazz.id, name_code, clazz.id, name_str),
+		FuncOutput(lambda p: p.bitsOff(name_strs).bitOn(name_str)))
+	pgl(".CLASS-PATTERN-%d ::= %s .PATTERN-%d{$} -> %s($1)" % (clazz.id, name_code, clazz.id, name_str),
+		FuncOutput(lambda p: p.bitsOff(name_strs).bitOn(name_str)))
+
+def defineBit(owner, *names):
+	global counter
+	counter += 1
+	names = names
+	name_strs = []
+	name_codes = []
+	for name in names:
+		name_strs.append(tokensToString(name, {"yksikkö", "nimento"}))
+		name_codes.append(nameToCode(name, rbits={"yksikkö", "nimento"}))
+	owner.bit_groups.append((names, name_strs, name_codes))
+	def addBitPhrases(name, name_str, name_code):
+		pgl(".ENUM-DEFAULT-DEF-%d ::= .CLASS-%d{nimento} on yleensä %s . -> $1 defaults %s" % (
+			counter, owner.id, nameToCode(name, bits={"nimento"}, rbits={"yksikkö", "nimento"}), name_str
+		), FuncOutput(lambda c: c.bitOn(name_str)))
+
+		for clazz in owner.subclasses():
+			addBitPhrase(clazz, name_code, name_str, name_strs)
+		
+		pgl(".CMD ::= .EXPR-%d{nimento} on nyt %s . -> $1.%s = $2" % (
+			owner.id, nameToCode(name, bits={"yksikkö", "nimento"}, rbits={"yksikkö", "nimento"}), name_str
+		), FuncOutput(lambda obj: obj.bitsOff(name_strs).bitOn(name_str)))
+	for name, name_str, name_code in zip(names, name_strs, name_codes):
+		addBitPhrases(name, name_str, name_code)
+	pgl(".DEF ::= .ENUM-DEFAULT-DEF-%d -> $1" % (counter,), identity)
 
 pgl(".ENUM-DEF ::= .CLASS{nimento} voi olla .* . -> $1 has bit $2", FuncOutput(defineBit))
+pgl(".ENUM-DEF ::= .CLASS{nimento} on joko .* tai .* . -> $1 has bits $2==!$3", FuncOutput(defineBit))
+pgl(".ENUM-DEF ::= .CLASS{nimento} on joko .* , .* tai .* . -> $1 has bits $2==!($3|$4)", FuncOutput(defineBit))
 pgl(".DEF ::= .ENUM-DEF -> $1", identity)
+
+# Relaatiot
+
+def defineRelation(symmetric, name, rclass1, rclass2):
+	pass #TODO
+
+pgl(".RELATION-DEF ::= .* on .CLASS{omanto} ja .CLASS{omanto} välinen relaatio. -> relation $1 : $2 <-> $3", FuncOutput(lambda *p: defineRelation(True, *p)))
+pgl(".RELATION-DEF ::= .* on .CLASS{omanto} ja .CLASS{omanto} välinen suunnattu relaatio. -> relation $1 : $2 <-> $3", FuncOutput(lambda *p: defineRelation(False, *p)))
+pgl(".DEF ::= .RELATION-DEF -> $1", identity)
 
 # Muuttujat
 
-class RScope:
-	def __init__(self, supers):
+class RScope(Bits):
+	def __init__(self):
+		Bits.__init__(self)
 		self.variables = {}
-		self.superscope = supers
-		self.bits = set()
-	def bitOn(self, bit):
-		self.bits.add(bit)
-	def bitOff(self, bit):
-		if bit in self.bits:
-			self.bits.remove(bit)
+	def __repr__(self):
+		return "Scope(" + repr(self.variables) + ")"
 
-SCOPE = [RScope(None)]
+GLOBAL_SCOPE = RScope()
+SCOPE = []
+STACK = []
 
 def pushScope():
-	SCOPE.append(RScope(SCOPE[-1]))
+	SCOPE.append(RScope())
 def popScope():
 	SCOPE.pop()
+def pushStackFrame():
+	STACK.append(RScope())
+def popStackFrame():
+	STACK.pop()
+def visibleScopes():
+	return [GLOBAL_SCOPE]+SCOPE+STACK[-1:]
 def getVar(name):
-	for scope in reversed(SCOPE):
+	for scope in reversed(visibleScopes()):
 		if name in scope.variables:
 			return scope.variables[name]
-	return None
+	sys.stderr.write("Muuttujaa ei löytynyt: " + name + "(" + repr(visibleScopes()) + ")\n")
+	return ei_mikään
 def setVar(name, val):
-	for scope in reversed(SCOPE):
+	scopes = visibleScopes()
+	for scope in reversed(scopes):
 		if name in scope.variables:
 			scope.variables[name] = val
 			break
 	else:
-		SCOPE[-1].variables[name] = val
+		scopes[-1].variables[name] = val
+def putVar(name, val):
+	visibleScopes()[-1].variables[name] = val
 
-def defineVariable(name, vtype):
+def defineVariable(name, pattern):
 	name_str = tokensToString(name)
-	SCOPE[-1].variables[name_str] = vtype.newInstance(name_str)
+	vtype = pattern.type()
+	GLOBAL_SCOPE.variables[name_str] = vtype.newInstance(name_str, bits=pattern.bits)
 	for clazz in vtype.superclasses():
 		pgl(".EXPR-%d ::= %s -> %s" % (clazz.id, nameToCode(name, rbits={"yksikkö", "nimento"}), name_str), FuncOutput(lambda: getVar(name_str)))
 	pgl(".CMD ::= %s on nyt EXPR-%d . -> %s = $1" % (nameToCode(name, {"nimento"}, rbits={"yksikkö", "nimento"}), vtype.id, name_str), FuncOutput(lambda x: setVar(name_str, x)))
 
-pgl(".VARIABLE-DEF ::= .* on .CLASS{nimento} . -> $1 : $2", FuncOutput(defineVariable))
+pgl(".VARIABLE-DEF ::= .* on .CLASS-PATTERN{nimento} . -> $1 : $2", FuncOutput(defineVariable))
 pgl(".DEF ::= .VARIABLE-DEF -> $1", identity)
 
 # Toiminnot
@@ -331,10 +398,13 @@ class RAction:
 		for listener in ACTION_LISTENERS:
 			if listener.action is self and all([p.matches(obj) for obj, (_, p, _) in zip(args, listener.params)]):
 				listeners.append(listener)
-		for listener in sorted(listeners, key=lambda l: l.priority):
+		pushScope()
+		scope = SCOPE[-1]
+		for listener in sorted(listeners, key=lambda l: abs(l.priority)):
 			listener.run(args)
-			if "stop action" in SCOPE[-1].bits:
+			if "stop action" in scope.bits or listener.priority < 0:
 				break
+		popScope()
 
 class RListener:
 	def __init__(self, action, params, priority):
@@ -345,26 +415,30 @@ class RListener:
 	def parse(self, file):
 		for c, p, n in self.params:
 			self.createParamPhrases(c, p, n)
-		self.grammar.parseGrammarLine(".CMD ::= keskeytä toiminto . -> stop", FuncOutput(lambda: SCOPE[-2].bitOn("stop action"))) # suoritetaan isäntäscopessa
+		self.grammar.parseGrammarLine(".CMD ::= keskeytä toiminto . -> stop", FuncOutput(lambda: SCOPE[-1].bitOn("stop action"))) # suoritetaan isäntäscopessa
 		self.body = parseBlock(file, self.grammar)
 	def createParamPhrases(self, c, p, n):
 		vtype = p.type()
 		if n:
 			self.grammar.parseGrammarLine(".EXPR-%d ::= %s -> %s param" % (vtype.id, n, vtype.name), FuncOutput(lambda: getVar("_"+c)))
 		else:
-			self.grammar.parseGrammarLine(".EXPR-%d ::= se{$} -> %s param" % (vtype.id, vtype.name), FuncOutput(lambda: getVar("_"+c)))
+			pronoun = "hän" if "inhimillinen" in vtype.bits else "se"
+			self.grammar.parseGrammarLine(".EXPR-%d ::= %s{$} -> %s param" % (vtype.id, pronoun, vtype.name), FuncOutput(lambda: getVar("_"+c)))
 	def run(self, args):
-		pushScope()
+		pushStackFrame()
 		for (c, _, _), a in zip(self.params, args):
-			SCOPE[-1].variables["_"+c] = a
+			putVar("_"+c, a)
 		for cmd in self.body:
 			cmd[0]()
-		popScope()
+			if "stop action" in SCOPE[-1].bits:
+				break
+		popStackFrame()
 
 LISTENER_PRIORITIES = [
 	("ennen", "osanto", "", 20),
+	("", "omanto", "sijasta", -40),
 	("", "omanto", "aikana", 50),
-	("", "omanto", "jälkeen", 50),
+	("", "omanto", "jälkeen", 80),
 ]
 
 ACTION_LISTENERS = []
@@ -501,7 +575,7 @@ def loadFile(file):
 			l = f.readline()
 			if not l:
 				break
-			if not l.strip():
+			if not l.strip() or l[0] == ">":
 				continue
 			a = GRAMMAR.matchAll(tokenize(l.strip()), "DEF", set())
 			if len(a) == 1:

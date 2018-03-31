@@ -1,4 +1,5 @@
 Ihminen on käsite.
+Ihminen on yleensä inhimillinen.
 Ihminen voi olla väsynyt.
 
 Paikka on käsite.
@@ -16,8 +17,8 @@ Ennen väsyneen ihmisen paikkaan liikkumista:
 	Keskeytä toiminto.
 
 Ihmisen paikkaan liikkumisen aikana:
-	Sen sijainti on nyt se.
+	Hänen sijaintinsa on nyt se.
 
 Ihmisen paikkaan liikkumisen jälkeen:
 	Sano "Matka oli sujuva".
-	Se on nyt väsynyt.
+	Hän on nyt väsynyt.
