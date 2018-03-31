@@ -28,7 +28,7 @@ def tokenize(text):
 		for word in voikko.analyze(token.tokenText):
 			if "BASEFORM" in word:
 				alternatives.append(baseformAndBits(word))
-		tokens.append(pp.Token(token.tokenText.lower(), alternatives))
+		tokens.append(pp.Token(token.tokenText, alternatives))
 	return tokens
 
 def baseformAndBits(word):
@@ -48,7 +48,7 @@ def baseformAndBits(word):
 		"conditional": "konditionaali",
 		"potential": "potentiaali"
 	})
-	return word["BASEFORM"], bits
+	return word["BASEFORM"].lower(), bits
 
 def addBits(word, bits, name, table=None):
 	if name in word:

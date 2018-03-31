@@ -74,6 +74,11 @@ class StringOutput:
 class Grammar:
 	def __init__(self, patterns=None):
 		self.patterns = patterns or {}
+	def print(self):
+		for category in sorted(self.patterns):
+			print(category, "::=")
+			for pattern in self.patterns[category]:
+				print(" " + pattern.toCode())
 	def copy(self):
 		return Grammar({name: self.patterns[name].copy() for name in self.patterns})
 	def matchAll(self, tokens, category, bits):

@@ -53,7 +53,7 @@ class WordPattern:
 	def toCode(self):
 		return "<pattern that matches any single token>"
 	def match(self, grammar, tokens, bits):
-		if len(tokens) != 1:
+		if len(tokens) != 1 or not any(altbits >= bits for _, altbits in tokens[0].alternatives):
 			return []
 		return [[lambda: tokens[0], tokens[0].token]]
 	def allowsEmptyContent(self):
@@ -72,8 +72,35 @@ class StringContentPattern:
 		for token in tokens:
 			if token.token == '"':
 				return []
-		string = " ".join([t.token for t in tokens])
-		return [[lambda: string, string]]
+		string = ""
+		subs = []
+		current_subs = None
+		for token in tokens:
+			if current_subs is not None:
+				if token.token == "]":
+					string += "%s"
+					alts = grammar.matchAll(current_subs, "EXPR-"+str(merkkijono.id), set())
+					subs.append(alts)
+					current_subs = None
+				else:
+					current_subs.append(token)
+				continue
+			if token.token == "[":
+				current_subs = []
+			elif token.token in [".", ",", ";", "?", "!"]:
+				string += token.token
+			elif token.token == "%":
+				string += " %%"
+			else:
+				string += " " + token.token
+		string = string.strip()
+		ans = []
+		for alternative in itertools.product(*subs):
+			ans.append([
+				lambda: string % tuple([p[0]().extra["str"] for p in alternative]),
+				string % tuple([p[1] for p in alternative])
+			])
+		return ans
 	def allowsEmptyContent(self):
 		return True
 
@@ -247,17 +274,6 @@ pgl(".CLASS-DEF ::= .* on käsite . -> class $1 : asia", FuncOutput(lambda x: de
 pgl(".CLASS-DEF ::= .* on .CLASS{omanto} alakäsite . -> class $1 : $2", FuncOutput(defineClass))
 pgl(".DEF ::= .CLASS-DEF -> $1", identity)
 
-# Sisäänrakennetut luokat
-
-asia = _defineClass("asia", "asia{$}", None)
-
-ei_mikään = asia.newInstance()
-pgl(".EXPR-%d ::= ei-mikään{$} -> ei-mikään" % (asia.id,), FuncOutput(lambda: ei_mikään))
-
-merkkijono = _defineClass("merkkijono", "merkkijono{$}", asia)
-pgl('.EXPR-%d ::= " .STR-CONTENT " -> "$1"' % (asia.id,), FuncOutput(lambda x: merkkijono.newInstance().setExtra("str", x)))
-pgl('.EXPR-%d ::= " .STR-CONTENT " -> "$1"' % (merkkijono.id,), FuncOutput(lambda x: merkkijono.newInstance().setExtra("str", x)))
-
 # Ominaisuudet
 
 def defineField(owner, name, vtype, case="nimento"):
@@ -278,6 +294,11 @@ def defineField(owner, name, vtype, case="nimento"):
 		field.id, owner.id, nameToCode(name, {"yksikkö", "nimento"}, rbits={case, "yksikkö"}), vtype.id, name_str
 	), FuncOutput(setDefaultValue))
 	pgl(".DEF ::= .FIELD-DEFAULT-DEF-%d -> $1" % (field.id,), identity)
+	
+	pgl(".FIELD-VALUE-DEF-%d ::= .EXPR-%d{omanto} %s on .EXPR-%d . -> $1.%s = $2" % (
+		field.id, owner.id, nameToCode(name, {"yksikkö", "nimento"}, rbits={case, "yksikkö"}), vtype.id, name
+	), FuncOutput(lambda obj, val: obj.set(name_str, val)))
+	pgl(".DEF ::= .FIELD-VALUE-DEF-%d -> $1" % (field.id,), identity)
 	
 	pgl(".CMD ::= .EXPR-%d{omanto} %s on nyt .EXPR-%d . -> $1.%s = $2" % (
 		owner.id, nameToCode(name, {"yksikkö", "nimento"}, rbits={case, "yksikkö"}), vtype.id, name
@@ -420,10 +441,12 @@ class RListener:
 	def createParamPhrases(self, c, p, n):
 		vtype = p.type()
 		if n:
-			self.grammar.parseGrammarLine(".EXPR-%d ::= %s -> %s param" % (vtype.id, n, vtype.name), FuncOutput(lambda: getVar("_"+c)))
+			for clazz in vtype.superclasses():
+				self.grammar.parseGrammarLine(".EXPR-%d ::= %s -> %s param" % (clazz.id, n, vtype.name), FuncOutput(lambda: getVar("_"+c)))
 		else:
 			pronoun = "hän" if "inhimillinen" in vtype.bits else "se"
-			self.grammar.parseGrammarLine(".EXPR-%d ::= %s{$} -> %s param" % (vtype.id, pronoun, vtype.name), FuncOutput(lambda: getVar("_"+c)))
+			for clazz in vtype.superclasses():
+				self.grammar.parseGrammarLine(".EXPR-%d ::= %s{$} -> %s param" % (clazz.id, pronoun, vtype.name), FuncOutput(lambda: getVar("_"+c)))
 	def run(self, args):
 		pushStackFrame()
 		for (c, _, _), a in zip(self.params, args):
@@ -495,23 +518,24 @@ def defineAction(name, params, pre, post):
 		cmd_pattern = " ".join([
 				"[ " + a_class.nameToCode({cmd_case, "yksikkö"}) + " ] .**"
 			for cmd_case, (_, a_class, _) in zip(cmd_cases, params)])
-		pgl(".COMMAND-DEF-%d ::= %s %s %s{-minen,omanto} %s komento on \" .** %s \" . -> def %s command" % (
-			action.id,
-			" ".join([
-				tokensToCode(a_pre) + a_class.nameToCode({a_case, "yksikkö"})
-			for a_pre, a_class, a_case in params]),
-			tokensToCode(pre), name.baseform("-minen"), tokensToCode(post),
-			cmd_pattern,
-			name.token
-		), FuncOutput(lambda *p: defineCommand(cmd_cases, *p)))
-		if sum([len(a_pre) for a_pre, _, _ in params]) + len(pre) + len(post) != 0:
+		if len(params) != 0:
 			pgl(".COMMAND-DEF-%d ::= %s %s %s{-minen,omanto} %s komento on \" .** %s \" . -> def %s command" % (
 				action.id,
-				" ".join([tokensToCode(a_pre) for a_pre, _, _ in params]),
+				" ".join([
+					tokensToCode(a_pre) + a_class.nameToCode({a_case, "yksikkö"})
+				for a_pre, a_class, a_case in params]),
 				tokensToCode(pre), name.baseform("-minen"), tokensToCode(post),
 				cmd_pattern,
 				name.token
 			), FuncOutput(lambda *p: defineCommand(cmd_cases, *p)))
+			if sum([len(a_pre) for a_pre, _, _ in params]) + len(pre) + len(post) != 0:
+				pgl(".COMMAND-DEF-%d ::= %s %s %s{-minen,omanto} %s komento on \" .** %s \" . -> def %s command" % (
+					action.id,
+					" ".join([tokensToCode(a_pre) for a_pre, _, _ in params]),
+					tokensToCode(pre), name.baseform("-minen"), tokensToCode(post),
+					cmd_pattern,
+					name.token
+				), FuncOutput(lambda *p: defineCommand(cmd_cases, *p)))
 		pgl(".COMMAND-DEF-%d ::= %s %s{-minen,omanto} %s komento on \" .** %s \" . -> def %s command" % (
 			action.id,
 			tokensToCode(pre), name.baseform("-minen"), tokensToCode(post),
@@ -527,6 +551,7 @@ def defineAction(name, params, pre, post):
 def addActionDefPattern(cases):
 	def transformArgs(args):
 		ans = []
+		i = -2
 		for case, i in zip(cases, range(0, len(cases)*2, 2)):
 			ans.append((args[i], args[i+1], case))
 		return args[i+3], ans, args[i+2], args[i+4]
@@ -541,6 +566,23 @@ for i in [0,1,2]:
 		addActionDefPattern(cases)
 
 pgl(".DEF ::= .ACTION-DEF -> $1", identity)
+
+# Sisäänrakennetut luokat
+
+asia = _defineClass("asia", "asia{$}", None)
+
+ei_mikään = asia.newInstance()
+pgl(".EXPR-%d ::= ei-mikään{$} -> ei-mikään" % (asia.id,), FuncOutput(lambda: ei_mikään))
+
+def createStringObj(x):
+	return merkkijono.newInstance().setExtra("str", x)
+
+merkkijono = _defineClass("merkkijono", "merkkijono{$}", asia)
+pgl('.EXPR-%d ::= " .STR-CONTENT " -> "$1"' % (asia.id,), FuncOutput(createStringObj))
+pgl('.EXPR-%d ::= " .STR-CONTENT " -> "$1"' % (merkkijono.id,), FuncOutput(createStringObj))
+newline_obj = createStringObj("\n")
+pgl('.EXPR-%d ::= rivinvaihto{$} -> "\\n"' % (merkkijono.id,), FuncOutput(lambda: newline_obj))
+pgl('.EXPR-%d ::= .EXPR-%d{$} isolla alkukirjaimella -> capitalize($1)' % (merkkijono.id, merkkijono.id), FuncOutput(lambda x: createStringObj(x.extra["str"].capitalize())))
 
 # Tulostaminen
 
@@ -596,7 +638,7 @@ def main():
 		path, file = os.path.split(t)
 		alternatives = []
 		try:
-			for c in sorted(["/kielioppi", "/käsitteet", "/debug", "/virheet", "/match", "/eval", "/lataa"]):
+			for c in sorted(["/kielioppi", "/käsitteet", "/debug ", "/virheet", "/match ", "/eval ", "/lataa ", "/komentotila", "/määrittelytila"]):
 				if c.startswith(t):
 					alternatives.append(c)
 			for f in filter(lambda f: f.startswith(file), os.listdir(path or ".")):
@@ -612,15 +654,11 @@ def main():
 	readline.set_completer_delims(" ")
 	readline.parse_and_bind('tab: complete')
 	
-	def printGrammar(grammar):
-		for category in sorted(grammar.patterns):
-			print(category, "::=")
-			for pattern in grammar.patterns[category]:
-				print(" " + pattern.toCode())
-	
 	def printStatistics():
 		n_patterns = sum([len(category) for category in GRAMMAR.patterns.values()])
 		print("Ladattu", n_patterns, "fraasia.")
+	
+	mode = ["DEF", "CMD"]
 	
 	printStatistics()
 	while True:
@@ -631,7 +669,7 @@ def main():
 		if not line:
 			continue
 		if line == "/kielioppi":
-			printGrammar(GRAMMAR)
+			GRAMMAR.print()
 			continue
 		elif line == "/käsitteet":
 			def printClass(clazz, indent):
@@ -675,22 +713,30 @@ def main():
 			loadFile(line[6:].strip())
 			printStatistics()
 			continue
+		elif line.startswith("/komentotila"):
+			mode = ["CMD", "DEF"]
+			continue
+		elif line.startswith("/määrittelytila"):
+			mode = ["DEF", "CMD"]
+			continue
 		del ERRORS[:]
-		phrase_type = "DEF"
+		phrase_type = mode[0]
 		if line[0] == "!":
-			phrase_type = "CMD"
+			phrase_type = mode[-1]
 			line = line[1:]
 		interpretations = GRAMMAR.matchAll(tokenize(line), phrase_type, set())
 		if len(interpretations) == 0:
 			print("Ei tulkintaa.")
 		elif len(interpretations) == 1:
-			print(interpretations[0][1])
+			if not mode[0] == phrase_type == "CMD":
+				print(interpretations[0][1])
 			interpretations[0][0]()
 		else:
 			print("Löydetty", len(interpretations), "tulkintaa:")
 			for _, interpretation in interpretations:
 				print(interpretation)
-		printStatistics()
+		if not mode[0] == phrase_type == "CMD":
+			printStatistics()
 			
 
 if __name__ == "__main__":
