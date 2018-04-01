@@ -1,5 +1,5 @@
 Pelin alkaminen on toiminto.
-Pelin alkamisen komento on "peli alkaa".
+Tulkitse "peli alkaa" pelin alkamisena.
 
 > Huoneet
 
@@ -9,12 +9,7 @@ Huone on joko avoin tai suljettu.
 Huone on yleensä avoin.
 
 Seinä on suljettu huone.
-Seinän kuvaus on "Melko tavallinen seinä".
-
-Huoneella on pohjoisnaapuriksi kutsuttu huone.
-Huoneen pohjoisnaapuri on yleensä seinä.
-Huoneella on etelänaapuriksi kutsuttu huone.
-Huoneen etelänaapuri on yleensä seinä.
+Seinän kuvaus on "Melko tavallinen seinä.".
 
 > Ihminen, pelaaja
 
@@ -27,20 +22,13 @@ Pelaaja on ihminen.
 
 [Huoneen] kuvaileminen on toiminto.
 Kuvailemisen komento on "kuvaile [huonetta]".
+Tulkitse "kuvaile [huonetta]" kuvailemisena.
 
 Huoneen kuvailemisen aikana:
 	Sano sen kuvaus.
 
 Suljetun huoneen kuvailemisen jälkeen:
-	Sano "Et näe ovea sinne.".
-
-> Katseleminen
-
-Katseleminen on toiminto.
-Katselemisen komento on "katsele".
-
-Katselemisen aikana:
-	Kuvaile pelaajan sijaintia.
+	Sano "Et voi mennä sinne.".
 
 > Esitteleminen
 
@@ -54,29 +42,37 @@ Huoneen esittelemisen aikana:
 Pelin alkamisen jälkeen:
 	Esittele pelaajan sijainti.
 
+> Katseleminen
+
+Katseleminen on toiminto.
+Tulkitse "katsele" katselemisena.
+
+Katselemisen aikana:
+	Esittele pelaajan sijainti.
+
 > Liikkuminen
 
-Pohjoiseen liikkuminen on toiminto.
-Pohjoiseen liikkumisen komento on "liiku pohjoiseen".
-Pohjoiseen liikkumisen komento on "mene pohjoiseen".
-Pohjoiseen liikkumisen komento on "pohjoiseen".
+Suunta on käsite.
+Pohjoinen on suunta.
+Etelä on suunta.
 
-Etelään liikkuminen on toiminto.
-Etelään liikkumisen komento on "liiku etelään".
-Etelään liikkumisen komento on "mene etelään".
-Etelään liikkumisen komento on "etelään".
+Kutakin suuntaa kohden huoneella voi olla naapurihuoneeksi siinä suunnassa kutsuttu huone.
+Huoneen naapurihuone suunnassa on yleensä seinä.
+
+[Suuntaan] liikkuminen on toiminto.
+Liikkumisen komento on "liiku [suuntaan]".
+Tulkitse "liiku [suuntaan]" liikkumisena.
+Tulkitse "mene [suuntaan]" liikkumisena.
+Tulkitse "[suuntaan]" liikkumisena.
 
 [Huoneeseen] siirtyminen on toiminto.
 Siirtymisen komento on "siirry [huoneeseen]".
 
-Pohjoiseen liikkumisen aikana:
-	Siirry pelaajan sijainnin pohjoisnaapuriin.
-
-Etelään liikkumisen aikana:
-	Siirry pelaajan sijainnin etelänaapuriin.
+Suuntaan (se suunta) liikkumisen aikana:
+	Siirry pelaajan sijainnin naapurihuoneeseen siinä suunnassa.
 
 Ennen suljettuun huoneeseen siirtymistä:
-	Sano "Et näe ovea.".
+	Sano "Et voi mennä sinne.".
 	Keskeytä toiminto.
 
 Huoneeseen siirtymisen aikana:
@@ -93,8 +89,8 @@ Eteisen kuvaus on "Eteisessä on kenkiä ja takkeja, mutta ei juuri mitään kii
 Olohuone on huone.
 Olohuoneen kuvaus on "Olohuoneessa on pieni sohva ja kolme tuolia ja se tuntuu ahtaalta.".
 
-Eteisen pohjoisnaapuri on olohuone.
-Olohuoneen etelänaapuri on eteinen.
+Eteisen naapurihuone pohjoisessa on olohuone.
+Olohuoneen naapurihuone etelässä on eteinen.
 
 Ennen pelin alkamista:
 	Pelaajan sijainti on nyt eteinen.
