@@ -131,17 +131,17 @@ def nameToBaseform(tokens, bits, rbits):
 					found = True
 					break
 			else:
-				if rbits <= tbits and ("laatusana" in tbits or "nimisana_laatusana" in tbits or "agent" in tbits):
+				if rbits <= tbits and tbits & {"laatusana", "nimisana_laatusana", "agent", "asemosana"}:
 					ans.append((bf, bits or {"$"}))
 					break
 		else:
 			ans.append((token.token, set()))
 	return reversed(ans)
 
-def tokensToString(tokens, rbits={"nimento"}):
+def tokensToString(tokens, rbits={"nimento", "yksikkö"}):
 	return " ".join([text for text, bits in nameToBaseform(tokens, {}, rbits)])
 
-def nameToCode(name, bits=None, rbits={"nimento"}):
+def nameToCode(name, bits=None, rbits={"nimento", "yksikkö"}):
 	return " ".join([token + ("{" + ",".join(tbits) + "}" if tbits else "") for token, tbits in nameToBaseform(name, bits, rbits)])
 
 def tokensToCode(tokens):
@@ -180,17 +180,44 @@ class RObject(Bits):
 			self.data["nimi koodissa"] = merkkijono.newInstance().setExtra("str", name)
 	def get(self, field_name):
 		if field_name not in self.data:
-			self.data[field_name] = self.rclass.fields[field_name].default_value
+			for clazz in self.rclass.superclasses():
+				if field_name in clazz.fields and clazz.fields[field_name]:
+					self.data[field_name] = clazz.fields[field_name].default_value
+					break
+			else:
+				self.data[field_name] = ei_mikään
 		return self.data[field_name]
 	def set(self, field_name, val):
 		self.data[field_name] = val
+	def getMap(self, field_name, key_val):
+		key = key_val.toKey()
+		if field_name not in self.data:
+			self.data[field_name] = {}
+		if key not in self.data[field_name]:
+			for clazz in self.rclass.superclasses():
+				if field_name in clazz.fields and clazz.fields[field_name]:
+					return clazz.fields[field_name].default_value
+			return ei_mikään
+		return self.data[field_name][key]
+	def setMap(self, field_name, key_val, val):
+		key = key_val.toKey()
+		if field_name not in self.data:
+			self.data[field_name] = {}
+		self.data[field_name][key] = val
 	def setExtra(self, name, data):
 		self.extra[name] = data
 		return self
 	def asString(self):
 		if self.name:
 			return self.name
+		if "str" in self.extra:
+			return self.extra["str"]
 		return "[eräs " + self.rclass.name + "]"
+	def toKey(self):
+		if "str" in self.extra:
+			return self.extra["str"]
+		else:
+			return self
 
 class RClass(Bits):
 	def __init__(self, name, superclass, name_tokens):
@@ -208,8 +235,10 @@ class RClass(Bits):
 		
 		if superclass:
 			self.superclass.direct_subclasses.append(self)
+	def addField(self, name, field):
+		self.fields[name] = field
 	def newInstance(self, name=None, bits=set()):
-		return RObject(self, name, self.bits|bits)
+		return RObject(self, name, self.allBits()|bits)
 	def superclasses(self):
 		if self.superclass == None:
 			return [self]
@@ -220,19 +249,27 @@ class RClass(Bits):
 		for subclass in self.direct_subclasses:
 			ans += subclass.subclasses()
 		return ans
+	def allBits(self):
+		ans = set()
+		for clazz in self.superclasses():
+			ans.update(clazz.bits)
+		return ans
 	def nameToCode(self, bits):
 		if self.name_tokens:
-			return nameToCode(name_tokens, rbits={"nimento", "yksikkö"}, bits=bits)
+			return nameToCode(self.name_tokens, rbits={"nimento", "yksikkö"}, bits=bits)
 		else:
 			return self.name + "{" + ",".join(bits) + "}"
 class RField:
-	def __init__(self, counter, name, vtype, defa=None):
+	def __init__(self, counter, name, vtype, defa=None, is_map=False):
 		self.id = counter
 		self.name = name
 		self.type = vtype
-		self.default_value = defa or ei_mikään
+		self.is_map = is_map
+		self.default_value = defa
+	def setDefaultValue(self, defa):
+		self.default_value = defa
 	def copy(self):
-		return RField(self.id, self.name, self.type, self.default_value)
+		return RField(self.id, self.name, self.type, None, self.is_map)
 
 class RPattern(Bits):
 	def __init__(self, rclass=None):
@@ -249,15 +286,19 @@ class RPattern(Bits):
 CLASSES = {}
 
 def defineClass(name, superclass):
-	_defineClass(tokensToString(name), nameToCode(name, rbits={"nimento", "yksikkö"}), superclass)
-def _defineClass(name_str, name_code, superclass, name_tokens=None):
+	name_str = tokensToString(name)
+	name_code = nameToCode(name)
+	
 	if name_str in CLASSES:
 		raise Exception("redefinition of class " + name_str)
-	rclass = RClass(name_str, superclass, name_tokens)
+	
+	rclass = RClass(name_str, superclass, name)
 	CLASSES[name_str] = rclass
+	
 	for clazz in reversed(superclass.superclasses()) if superclass else []:
 		for fname in clazz.fields:
 			rclass.fields[fname] = clazz.fields[fname].copy()
+	
 	pgl(".CLASS-PATTERN-%d ::= %s -> %s" % (rclass.id, name_code, name_str), FuncOutput(lambda: RPattern(rclass=rclass)))
 	pgl(".CLASS-PATTERN ::= .CLASS-PATTERN-%d{$} -> $1" % (rclass.id,), identity)
 	for clazz in rclass.superclasses():
@@ -268,6 +309,20 @@ def _defineClass(name_str, name_code, superclass, name_tokens=None):
 				for group_str, group_code in zip(group_strs, group_codes):
 					addBitPhrase(rclass, group_str, group_code, group_strs)
 	pgl(".CLASS ::= %s -> %s" % (name_code, name_str), FuncOutput(lambda: rclass))
+	
+	def addMapFieldDefPattern(key_case, is_pre):
+		pgl(".DEF ::= Kutakin %s kohden .CLASS{ulkoolento} voi olla %s se{%s} %s %s kutsuttu .CLASS{nimento} . -> $1.$2 : {$4}" % (
+			nameToCode(name, bits={"osanto", "yksikkö"}),
+			".**" if is_pre else "",
+			key_case,
+			nameToCode(name, bits={key_case, "yksikkö"}),
+			".**" if not is_pre else ""
+		), FuncOutput(lambda *p: defineMapField(rclass, key_case, is_pre, *p, case="tulento")))
+	
+	for key_case in CASES:
+		for is_pre in [True, False]:
+			addMapFieldDefPattern(key_case, is_pre)
+	
 	return rclass
 
 pgl(".CLASS-DEF ::= .* on käsite . -> class $1 : asia", FuncOutput(lambda x: defineClass(x, asia)))
@@ -276,37 +331,80 @@ pgl(".DEF ::= .CLASS-DEF -> $1", identity)
 
 # Ominaisuudet
 
+def definePolyparamField(field_id, owner, vtype, to_register, pattern, to_get, get_str_output, to_set, set_str_output, defa_pattern, to_set_defa, set_defa_str_output):
+	
+	for clazz in owner.subclasses():
+		to_register(clazz)
+	
+	for clazz in vtype.superclasses():
+		pgl(".EXPR-%d ::= .EXPR-%d{omanto} %s -> %s" % (clazz.id, owner.id, pattern({"$"}), get_str_output), FuncOutput(to_get))
+	
+	pgl(".FIELD-DEFAULT-DEF-%d ::= .CLASS-%d{omanto} %s on yleensä .EXPR-%d . -> %s" % (
+		field_id, owner.id, defa_pattern({"yksikkö", "nimento"}), vtype.id, set_defa_str_output
+	), FuncOutput(to_set_defa))
+	pgl(".DEF ::= .FIELD-DEFAULT-DEF-%d -> $1" % (field_id,), identity)
+	
+	pgl(".FIELD-VALUE-DEF-%d ::= .EXPR-%d{omanto} %s on .EXPR-%d . -> %s" % (
+		field_id, owner.id, pattern({"yksikkö", "nimento"}), vtype.id, set_str_output
+	), FuncOutput(to_set))
+	pgl(".DEF ::= .FIELD-VALUE-DEF-%d -> $1" % (field_id,), identity)
+	
+	pgl(".CMD ::= .EXPR-%d{omanto} %s on nyt .EXPR-%d . -> %s" % (
+		owner.id, pattern({"yksikkö", "nimento"}), vtype.id, set_str_output
+	), FuncOutput(to_set))
+
 def defineField(owner, name, vtype, case="nimento"):
 	name_str = tokensToString(name, {"yksikkö", case})
 	global counter
 	counter += 1
 	
-	for clazz in owner.subclasses():
-		field = RField(counter, name_str, vtype)
-		clazz.fields[name_str] = field
+	pattern = lambda bits: nameToCode(name, bits, rbits={case, "yksikkö"})
 	
-	for clazz in vtype.superclasses():
-		pgl(".EXPR-%d ::= .EXPR-%d{omanto} %s -> $1.%s" % (clazz.id, owner.id, nameToCode(name, rbits={case, "yksikkö"}), name_str), FuncOutput(lambda obj: obj.get(name_str)))
-	
-	def setDefaultValue(clazz, defa):
-		clazz.fields[name_str].default_value = defa
-	pgl(".FIELD-DEFAULT-DEF-%d ::= .CLASS-%d{omanto} %s on yleensä .EXPR-%d . -> $1.%s defaults $2" % (
-		field.id, owner.id, nameToCode(name, {"yksikkö", "nimento"}, rbits={case, "yksikkö"}), vtype.id, name_str
-	), FuncOutput(setDefaultValue))
-	pgl(".DEF ::= .FIELD-DEFAULT-DEF-%d -> $1" % (field.id,), identity)
-	
-	pgl(".FIELD-VALUE-DEF-%d ::= .EXPR-%d{omanto} %s on .EXPR-%d . -> $1.%s = $2" % (
-		field.id, owner.id, nameToCode(name, {"yksikkö", "nimento"}, rbits={case, "yksikkö"}), vtype.id, name
-	), FuncOutput(lambda obj, val: obj.set(name_str, val)))
-	pgl(".DEF ::= .FIELD-VALUE-DEF-%d -> $1" % (field.id,), identity)
-	
-	pgl(".CMD ::= .EXPR-%d{omanto} %s on nyt .EXPR-%d . -> $1.%s = $2" % (
-		owner.id, nameToCode(name, {"yksikkö", "nimento"}, rbits={case, "yksikkö"}), vtype.id, name
-	), FuncOutput(lambda obj, val: obj.set(name_str, val)))
+	definePolyparamField(
+		counter,
+		owner,
+		vtype,
+		lambda clazz: clazz.addField(name_str, RField(counter, name_str, vtype)),
+		pattern,
+		lambda obj: obj.get(name_str),
+		"$1.%s" % (name_str,),
+		lambda obj, val: obj.set(name_str, val),
+		"$1.%s = $2" % (name_str,),
+		pattern,
+		lambda clazz, defa: clazz.fields[name_str].setDefaultValue(defa),
+		"$1.%s defaults $2" % (name_str,)
+	)
 
 pgl(".FIELD-DEF ::= .CLASS{ulkoolento} on .* , joka on .CLASS{nimento} . -> $1.$2 : $3", FuncOutput(defineField))
 pgl(".FIELD-DEF ::= .CLASS{ulkoolento} on .* kutsuttu .CLASS{nimento} . -> $1.$2 : $3", FuncOutput(lambda *x: defineField(*x, case="tulento")))
 pgl(".DEF ::= .FIELD-DEF -> $1", identity)
+
+def defineMapField(key_class, key_case, is_pre, owner, name, vtype, case="nimento"):
+	name_str = "m"+str(key_class.id)+"-"+tokensToString(name, rbits={case, "yksikkö"})
+	name_code = nameToCode(name, rbits={case, "yksikkö"})
+	
+	global counter
+	counter += 1
+	
+	def createKeyPattern(category):
+		return ".%s-%d{%s}" % (category, key_class.id, key_case)
+	pre = lambda cat: (createKeyPattern(cat)+" " if not is_pre else "")
+	post = lambda cat: (" "+createKeyPattern(cat) if is_pre else "")
+	
+	definePolyparamField(
+		counter,
+		owner,
+		vtype,
+		lambda clazz: clazz.addField(name_str, RField(counter, name_str, vtype, is_map=True)),
+		lambda bits: pre("EXPR") + nameToCode(name, bits, rbits={case, "yksikkö"}) + post("EXPR"),
+		lambda obj, key: obj.getMap(name_str, key),
+		"$1.%s" % (name_str,),
+		lambda obj, key, val: obj.setMap(name_str, key, val),
+		"$1.%s = $2" % (name_str,),
+		lambda bits: pre("CLASS") + nameToCode(name, bits, rbits={case, "yksikkö"}) + post("CLASS"),
+		lambda clazz, _, defa: clazz.fields[name_str].setDefaultValue(defa),
+		"$1.%s defaults $2" % (name_str,)
+	)
 
 # Adjektiivit
 
@@ -421,17 +519,24 @@ class RAction:
 				listeners.append(listener)
 		pushScope()
 		scope = SCOPE[-1]
-		for listener in sorted(listeners, key=lambda l: abs(l.priority)):
+		special_case_found = False
+		for listener in sorted(listeners, key=lambda l: l.priority):
+			if listener.is_general_case and special_case_found:
+				continue
+			if listener.is_special_case:
+				special_case_found = True
 			listener.run(args)
-			if "stop action" in scope.bits or listener.priority < 0:
+			if "stop action" in scope.bits:
 				break
 		popScope()
 
 class RListener:
-	def __init__(self, action, params, priority):
+	def __init__(self, action, params, priority, is_special_case, is_general_case):
 		self.action = action
 		self.params = params
 		self.priority = priority
+		self.is_special_case = is_special_case
+		self.is_general_case = is_general_case
 		self.grammar = GRAMMAR.copy()
 	def parse(self, file):
 		for c, p, n in self.params:
@@ -442,7 +547,9 @@ class RListener:
 		vtype = p.type()
 		if n:
 			for clazz in vtype.superclasses():
-				self.grammar.parseGrammarLine(".EXPR-%d ::= %s -> %s param" % (clazz.id, n, vtype.name), FuncOutput(lambda: getVar("_"+c)))
+				self.grammar.parseGrammarLine(".EXPR-%d ::= %s -> %s param" % (
+					clazz.id, nameToCode(n, rbits={"yksikkö", "nimento"}), vtype.name
+				), FuncOutput(lambda: getVar("_"+c)))
 		else:
 			pronoun = "hän" if "inhimillinen" in vtype.bits else "se"
 			for clazz in vtype.superclasses():
@@ -457,11 +564,14 @@ class RListener:
 				break
 		popStackFrame()
 
+# jälkimmäinen sarake kertoo, syrjäytyvätkö tämäntyyppiset säännöt, jos toiseksi jälkimmäisessä sarakkeessa vastaava syrjäyttävä sääntö täsmää
+
 LISTENER_PRIORITIES = [
-	("ennen", "osanto", "", 20),
-	("", "omanto", "sijasta", -40),
-	("", "omanto", "aikana", 50),
-	("", "omanto", "jälkeen", 80),
+#	 PRE       CASE     POST       PRI SPECIAL GENERAL
+	("ennen", "osanto", "",        20, False,  False),
+	("",      "omanto", "sijasta", 40, True,   False),
+	("",      "omanto", "aikana",  50, False,  True),
+	("",      "omanto", "jälkeen", 80, False,  False),
 ]
 
 ACTION_LISTENERS = []
@@ -469,8 +579,8 @@ ACTION_LISTENERS = []
 def defineAction(name, params, pre, post):
 	action = RAction(name)
 	
-	def defineActionListener(patterns, priority):
-		listener = RListener(action, [(a_case, pattern, name) for (pattern, name), (_, _, a_case) in zip(patterns, params)], priority)
+	def defineActionListener(patterns, priority, is_special_case, is_general_case):
+		listener = RListener(action, [(a_case, pattern, name) for (pattern, name), (_, _, a_case) in zip(patterns, params)], priority, is_special_case, is_general_case)
 		ACTION_LISTENERS.append(listener)
 		return listener
 	
@@ -488,7 +598,7 @@ def defineAction(name, params, pre, post):
 			j += 1
 		return ans
 	
-	def addListenerDefPattern(p_pre, p_case, p_post, priority, nameds):
+	def addListenerDefPattern(p_pre, p_case, p_post, priority, is_special_case, is_general_case, nameds):
 		pgl(".LISTENER-DEF-%d ::= %s %s %s %s{-minen,%s} %s %s : -> def %s($1):" % (
 			action.id,
 			p_pre,
@@ -498,15 +608,16 @@ def defineAction(name, params, pre, post):
 			for named, (a_pre, a_class, a_case) in zip(nameds, params)]),
 			tokensToCode(pre), name.baseform("-minen"), p_case, tokensToCode(post), p_post,
 			name.token
-		), FuncOutput(lambda *groups: defineActionListener(separateGroups(groups, nameds), priority)))
+		), FuncOutput(lambda *groups: defineActionListener(separateGroups(groups, nameds), priority, is_special_case, is_general_case)))
 	
-	for p_pre, p_case, p_post, priority in LISTENER_PRIORITIES:
+	for p_pre, p_case, p_post, priority, is_special_case, is_general_case in LISTENER_PRIORITIES:
 		for nameds in itertools.product(*[[False, True]]*len(params)):
-			addListenerDefPattern(p_pre, p_case, p_post, priority, nameds)
+			addListenerDefPattern(p_pre, p_case, p_post, priority, is_special_case, is_general_case, nameds)
 	pgl(".DEF ::= .LISTENER-DEF-%d -> $1" % (action.id,), identity)
 	
-	def defineCommand(cmd_cases, pre, *posts):
-		pgl(".CMD ::= %s %s . -> %s($1)" % (
+	def defineCommand(category, cmd_cases, pre, *posts):
+		pgl(".%s ::= %s %s . -> %s($1)" % (
+			category,
 			tokensToCode(pre),
 			" ".join([
 				".EXPR-%d{%s,yksikkö} %s" % (a_class.id, cmd_case, tokensToCode(post))
@@ -518,30 +629,40 @@ def defineAction(name, params, pre, post):
 		cmd_pattern = " ".join([
 				"[ " + a_class.nameToCode({cmd_case, "yksikkö"}) + " ] .**"
 			for cmd_case, (_, a_class, _) in zip(cmd_cases, params)])
-		if len(params) != 0:
-			pgl(".COMMAND-DEF-%d ::= %s %s %s{-minen,omanto} %s komento on \" .** %s \" . -> def %s command" % (
-				action.id,
-				" ".join([
-					tokensToCode(a_pre) + a_class.nameToCode({a_case, "yksikkö"})
-				for a_pre, a_class, a_case in params]),
+		action_patterns = [
+			"%s %s{-minen,CASE} %s" % (
 				tokensToCode(pre), name.baseform("-minen"), tokensToCode(post),
+			)
+		]
+		if len(params) != 0:
+			action_patterns.append(
+				"%s %s %s{-minen,CASE} %s" % (
+					" ".join([
+						tokensToCode(a_pre) + a_class.nameToCode({a_case, "yksikkö"})
+					for a_pre, a_class, a_case in params]),
+					tokensToCode(pre), name.baseform("-minen"), tokensToCode(post)
+				)
+			)
+			if sum([len(a_pre) for a_pre, _, _ in params]) + len(pre) + len(post) != 0:
+				action_patterns.append(
+					"%s %s %s{-minen,CASE} %s" % (
+						" ".join([tokensToCode(a_pre) for a_pre, _, _ in params]),
+						tokensToCode(pre), name.baseform("-minen"), tokensToCode(post),
+					)
+				)
+		for action_pattern in action_patterns:
+			pgl(".COMMAND-DEF-%d ::= %s komento on \" .** %s \" . -> def %s command" % (
+				action.id,
+				action_pattern.replace("CASE", "omanto"),
 				cmd_pattern,
 				name.token
-			), FuncOutput(lambda *p: defineCommand(cmd_cases, *p)))
-			if sum([len(a_pre) for a_pre, _, _ in params]) + len(pre) + len(post) != 0:
-				pgl(".COMMAND-DEF-%d ::= %s %s %s{-minen,omanto} %s komento on \" .** %s \" . -> def %s command" % (
-					action.id,
-					" ".join([tokensToCode(a_pre) for a_pre, _, _ in params]),
-					tokensToCode(pre), name.baseform("-minen"), tokensToCode(post),
-					cmd_pattern,
-					name.token
-				), FuncOutput(lambda *p: defineCommand(cmd_cases, *p)))
-		pgl(".COMMAND-DEF-%d ::= %s %s{-minen,omanto} %s komento on \" .** %s \" . -> def %s command" % (
-			action.id,
-			tokensToCode(pre), name.baseform("-minen"), tokensToCode(post),
-			cmd_pattern,
-			name.token
-		), FuncOutput(lambda *p: defineCommand(cmd_cases, *p)))
+			), FuncOutput(lambda *p: defineCommand("CMD", cmd_cases, *p)))
+			pgl(".COMMAND-DEF-%d ::= tulkitse \" .** %s \" %s . -> def %s command" % (
+				action.id,
+				cmd_pattern,
+				action_pattern.replace("CASE", "olento"),
+				name.token
+			), FuncOutput(lambda *p: defineCommand("PLAYER-CMD", cmd_cases, *p)))
 	
 	for cmd_cases in itertools.product(*[CASES]*len(params)):
 		addCommandDefPhrase(cmd_cases)
@@ -569,7 +690,7 @@ pgl(".DEF ::= .ACTION-DEF -> $1", identity)
 
 # Sisäänrakennetut luokat
 
-asia = _defineClass("asia", "asia{$}", None)
+asia = defineClass(tokenize("asia"), None)
 
 ei_mikään = asia.newInstance()
 pgl(".EXPR-%d ::= ei-mikään{$} -> ei-mikään" % (asia.id,), FuncOutput(lambda: ei_mikään))
@@ -577,7 +698,7 @@ pgl(".EXPR-%d ::= ei-mikään{$} -> ei-mikään" % (asia.id,), FuncOutput(lambda
 def createStringObj(x):
 	return merkkijono.newInstance().setExtra("str", x)
 
-merkkijono = _defineClass("merkkijono", "merkkijono{$}", asia)
+merkkijono = defineClass(tokenize("merkkijono"), asia)
 pgl('.EXPR-%d ::= " .STR-CONTENT " -> "$1"' % (asia.id,), FuncOutput(createStringObj))
 pgl('.EXPR-%d ::= " .STR-CONTENT " -> "$1"' % (merkkijono.id,), FuncOutput(createStringObj))
 newline_obj = createStringObj("\n")
@@ -587,10 +708,7 @@ pgl('.EXPR-%d ::= .EXPR-%d{$} isolla alkukirjaimella -> capitalize($1)' % (merkk
 # Tulostaminen
 
 def printCommand(value):
-	if value.rclass is merkkijono:
-		print(value.extra["str"])
-	else:
-		print(value.asString())
+	print(value.asString())
 
 pgl(".CMD ::= sano .EXPR-%d{nimento} . -> print($1)" % (asia.id,), FuncOutput(printCommand))
 
@@ -638,7 +756,7 @@ def main():
 		path, file = os.path.split(t)
 		alternatives = []
 		try:
-			for c in sorted(["/kielioppi", "/käsitteet", "/debug ", "/virheet", "/match ", "/eval ", "/lataa ", "/komentotila", "/määrittelytila"]):
+			for c in sorted(["/kielioppi", "/käsitteet", "/debug ", "/virheet", "/match ", "/eval ", "/lataa ", "/pelitila", "/komentotila", "/määrittelytila"]):
 				if c.startswith(t):
 					alternatives.append(c)
 			for f in filter(lambda f: f.startswith(file), os.listdir(path or ".")):
@@ -658,7 +776,8 @@ def main():
 		n_patterns = sum([len(category) for category in GRAMMAR.patterns.values()])
 		print("Ladattu", n_patterns, "fraasia.")
 	
-	mode = ["DEF", "CMD"]
+	mode = ["DEF", "CMD", "PLAYER-CMD"]
+	mode_chars = ["!", "?"]
 	
 	printStatistics()
 	while True:
@@ -713,29 +832,32 @@ def main():
 			loadFile(line[6:].strip())
 			printStatistics()
 			continue
+		elif line.startswith("/pelitila"):
+			mode = ["PLAYER-CMD", "CMD", "DEF"]
+			continue
 		elif line.startswith("/komentotila"):
-			mode = ["CMD", "DEF"]
+			mode = ["CMD", "DEF", "PLAYER-CMD"]
 			continue
 		elif line.startswith("/määrittelytila"):
-			mode = ["DEF", "CMD"]
+			mode = ["DEF", "CMD", "PLAYER-CMD"]
 			continue
 		del ERRORS[:]
 		phrase_type = mode[0]
-		if line[0] == "!":
-			phrase_type = mode[-1]
+		if line[0] in mode_chars:
+			phrase_type = mode[mode_chars.index(line[0])+1]
 			line = line[1:]
 		interpretations = GRAMMAR.matchAll(tokenize(line), phrase_type, set())
 		if len(interpretations) == 0:
 			print("Ei tulkintaa.")
 		elif len(interpretations) == 1:
-			if not mode[0] == phrase_type == "CMD":
+			if not mode[0] == phrase_type == "PLAYER-CMD":
 				print(interpretations[0][1])
 			interpretations[0][0]()
 		else:
 			print("Löydetty", len(interpretations), "tulkintaa:")
 			for _, interpretation in interpretations:
 				print(interpretation)
-		if not mode[0] == phrase_type == "CMD":
+		if not mode[0] == phrase_type == "PLAYER-CMD":
 			printStatistics()
 			
 
