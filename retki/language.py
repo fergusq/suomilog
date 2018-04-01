@@ -425,16 +425,24 @@ def defineBit(owner, *names):
 		name_codes.append(nameToCode(name, rbits={"yksikkö", "nimento"}))
 	owner.bit_groups.append((names, name_strs, name_codes))
 	def addBitPhrases(name, name_str, name_code):
+		name_code_nominative = nameToCode(name, bits={"yksikkö", "nimento"}, rbits={"yksikkö", "nimento"})
+		
 		pgl(".ENUM-DEFAULT-DEF-%d ::= .CLASS-%d{nimento} on yleensä %s . -> $1 defaults %s" % (
-			counter, owner.id, nameToCode(name, bits={"nimento"}, rbits={"yksikkö", "nimento"}), name_str
+			counter, owner.id, name_code_nominative, name_str
 		), FuncOutput(lambda c: c.bitOn(name_str)))
 
 		for clazz in owner.subclasses():
 			addBitPhrase(clazz, name_code, name_str, name_strs)
 		
-		pgl(".CMD ::= .EXPR-%d{nimento} on nyt %s . -> $1.%s = $2" % (
-			owner.id, nameToCode(name, bits={"yksikkö", "nimento"}, rbits={"yksikkö", "nimento"}), name_str
+		pgl(".CMD ::= .EXPR-%d{nimento} on nyt %s . -> $1.%s = True" % (
+			owner.id, name_code_nominative, name_str
 		), FuncOutput(lambda obj: obj.bitsOff(name_strs).bitOn(name_str)))
+		
+		# TODO
+		pgl(".COND ::= .EXPR-%d{nimento} on %s -> $1.%s" %(
+			owner.id, name_code_nominative, name_str
+		), FuncOutput(lambda obj: name_str in obj.bits))
+		
 	for name, name_str, name_code in zip(names, name_strs, name_codes):
 		addBitPhrases(name, name_str, name_code)
 	pgl(".DEF ::= .ENUM-DEFAULT-DEF-%d -> $1" % (counter,), identity)
