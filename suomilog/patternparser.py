@@ -36,6 +36,11 @@ class Token:
 			if tbits <= bits:
 				return baseform
 		return None
+	def bits(self):
+		bits = set()
+		for _, b in self.alternatives:
+			bits.update(b)
+		return bits
 
 class PatternRef:
 	def __init__(self, name, bits):
@@ -65,10 +70,11 @@ class StringOutput:
 	def eval(self, args):
 		ans = self.string
 		for i, a in enumerate(args):
-			try:
-				ans = ans.replace("$"+str(i+1), a)
-			except:
-				print(a)
+			var = "$"+str(i+1)
+			if var not in ans:
+				ans = ans.replace("$*", ",".join(args[i:]))
+				break
+			ans = ans.replace(var, a)
 		return ans
 
 class Grammar:
@@ -82,11 +88,17 @@ class Grammar:
 	def copy(self):
 		return Grammar({name: self.patterns[name].copy() for name in self.patterns})
 	def matchAll(self, tokens, category, bits):
+		if category not in self.patterns:
+			return []
+		
 		ans = []
 		for pattern in self.patterns[category]:
 			ans += pattern.match(self, tokens, bits)
+		
 		return ans
 	def allowsEmptyContent(self, category):
+		if category not in self.patterns:
+			return False
 		return any([pattern.allowsEmptyContent() for pattern in self.patterns[category]])
 	def parseGrammarLine(self, line, *outputs):
 		if debug_level >= 1:
@@ -129,7 +141,7 @@ def setDebug(n):
 	global debug_level
 	debug_level = n
 
-ERRORS = []
+ERROR_STACK = [[]]
 
 def makeErrorMessage(ref, tokens, start, length):
 	line1 = ""
@@ -152,7 +164,7 @@ def makeErrorMessage(ref, tokens, start, length):
 			line3 += " " * len(token.token)
 		elif i == start:
 			line3 += "expected " + ref.toCode()
-	ERRORS.append(line1 + "\n" + line2 + "\n" + line3)
+	ERROR_STACK[-1].append(line1 + "\n" + line2 + "\n" + line3)
 
 class Pattern:
 	def __init__(self, name, words, output):
@@ -207,9 +219,17 @@ class Pattern:
 		
 		args = []
 		for i, w in enumerate([w for w in self.words if isinstance(w, PatternRef)]):
+			ERROR_STACK.append([])
+			
 			match = grammar.matchAll(groups[w][1], w.name, (w.bits-{"$"})|(bits if "$" in w.bits else set()))
+			
+			errors = "\n\n".join(ERROR_STACK.pop())
 			if len(match) == 0:
 				makeErrorMessage(w, tokens, groups[w][0], len(groups[w][1]))
+				if len(errors) > 0:
+					collective_error = f"{w.name} does not match because:\n " + errors.replace("\n", "\n ")
+					ERROR_STACK[-1].append(collective_error)
+			
 			args.append(match)
 		ans = ans+[self.output.eval(c) for c in itertools.product(*args)]
 		

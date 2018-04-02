@@ -14,9 +14,9 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <http://www.gnu.org/licenses/>.
 
-import readline, os, sys, argparse
+import readline, os, sys, argparse, traceback
 import itertools
-from suomilog.patternparser import ERRORS, setDebug, PatternRef, Grammar
+from suomilog.patternparser import ERROR_STACK, setDebug, PatternRef, Grammar
 from suomilog.finnish import tokenize, CASES
 from .language import *
 from .tokenutils import *
@@ -80,7 +80,7 @@ class StringContentPattern:
 		for token in tokens:
 			if current_subs is not None:
 				if token.token == "]":
-					string += "%s"
+					string += " %s"
 					alts = grammar.matchAll(current_subs, "EXPR-"+str(merkkijono.id), set())
 					subs.append(alts)
 					current_subs = None
@@ -89,7 +89,7 @@ class StringContentPattern:
 				continue
 			if token.token == "[":
 				current_subs = []
-			elif token.token in [".", ",", ";", "?", "!"]:
+			elif token.token in [".", ":", ",", ";", "?", "!"]:
 				string += token.token
 			elif token.token == "%":
 				string += " %%"
@@ -129,17 +129,21 @@ def defineClass(name, superclass):
 	
 	pgl(".CLASS-PATTERN-%d ::= %s -> %s" % (rclass.id, name_code, name_str), FuncOutput(lambda: RPattern(rclass=rclass)))
 	pgl(".CLASS-PATTERN ::= .CLASS-PATTERN-%d{$} -> $1" % (rclass.id,), identity)
+	pgl(".CLASS-PATTERN ::= .CLASS-PATTERN-WITH-ADV-%d{$} -> $1" % (rclass.id,), identity)
 	for clazz in rclass.superclasses():
 		pgl(".CLASS-%d ::= %s -> %s" % (clazz.id, name_code, name_str), FuncOutput(lambda: rclass))
 		pgl(".PATTERN-%d ::= %s -> %s" % (clazz.id, name_code, name_str), FuncOutput(lambda: RPattern(rclass=rclass)))
 		if clazz is not rclass:
 			for _, group_strs, group_codes in clazz.bit_groups:
 				for group_str, group_code in zip(group_strs, group_codes):
-					addBitPhrase(rclass, group_str, group_code, group_strs)
+					addBitPatternPhrase(rclass, rclass, group_str, group_code, group_strs)
+					addBitClassPatternPhrase(rclass, group_str, group_code, group_strs)
+			for attributePhraseAdder in clazz.attributePhraseAdders:
+				attributePhraseAdder(rclass, rclass)
 	pgl(".CLASS ::= %s -> %s" % (name_code, name_str), FuncOutput(lambda: rclass))
 	
 	def addMapFieldDefPattern(key_case, is_pre):
-		pgl(".DEF ::= Kutakin %s kohden .CLASS{ulkoolento} voi olla %s se{%s} %s %s kutsuttu .CLASS{nimento} . -> $1.$2 : {$4}" % (
+		pgl(".MAP-FIELD-DEF ::= Kutakin %s kohden .CLASS{ulkoolento} voi olla %s se{%s} %s %s kutsuttu .CLASS{nimento} . -> $1.$2 : {$4}" % (
 			nameToCode(name, bits={"osanto", "yksikkö"}),
 			".**" if is_pre else "",
 			key_case,
@@ -180,6 +184,10 @@ def definePolyparamField(field_id, owner, vtype, to_register, pattern, to_get, g
 	pgl(".CMD ::= .EXPR-%d{omanto} %s on nyt .EXPR-%d{nimento} . -> %s" % (
 		owner.id, pattern({"yksikkö", "nimento"}), vtype.id, set_str_output
 	), FuncOutput(to_set))
+	
+	pgl(".COND ::= .EXPR-%d{omanto} %s on .EXPR-%d{nimento} -> $1.%s==$2" % (
+		owner.id, pattern({"yksikkö", "nimento"}), vtype.id, get_str_output
+	), FuncOutput(lambda *p: (f'({to_get(*p[:-1])} == {p[-1]})', to_set(*p))))
 
 def defineField(owner, name, vtype, case="nimento"):
 	name_str = tokensToString(name, {"yksikkö", case})
@@ -206,7 +214,9 @@ def defineField(owner, name, vtype, case="nimento"):
 
 pgl(".FIELD-DEF ::= .CLASS{ulkoolento} on .* , joka on .CLASS{nimento} . -> $1.$2 : $3", FuncOutput(defineField))
 pgl(".FIELD-DEF ::= .CLASS{ulkoolento} on .* kutsuttu .CLASS{nimento} . -> $1.$2 : $3", FuncOutput(lambda *x: defineField(*x, case="tulento")))
+pgl(".FIELD-DEF ::= .CLASS{ulkoolento} on .* kutsuttu joukko .CLASS{osanto,monikko} . -> $1.$2 : $3", FuncOutput(lambda *x: defineListField(*x, case="tulento")))
 pgl(".DEF ::= .FIELD-DEF -> $1", identity)
+pgl(".DEF ::= .MAP-FIELD-DEF -> $1", identity)
 
 def defineMapField(key_class, key_case, is_pre, owner, name, vtype, case="nimento"):
 	name_str = "m"+str(key_class.id)+"-"+tokensToString(name, rbits={case, "yksikkö"})
@@ -235,12 +245,45 @@ def defineMapField(key_class, key_case, is_pre, owner, name, vtype, case="niment
 		"$1.%s[$2] defaults $3" % (name_str,)
 	)
 
+def defineListField(owner, name, vtype, case="nimento"):
+	name_str = "l-"+tokensToString(name, {"yksikkö", case})
+	pattern = lambda bits: nameToCode(name, bits, rbits={case, "yksikkö"})
+	
+	increaseCounter()
+	counter = getCounter()
+	
+	to_append = lambda val, obj: f'{obj}.appendSet({repr(name_str)}, {val})'
+	to_remove = lambda val, obj: f'{obj}.removeSet({repr(name_str)}, {val})'
+	
+	pgl(".CMD ::= lisää .EXPR-%d{nimento} .EXPR-%d{omanto} %s . -> $2.%s.append($1)" % (
+		vtype.id, owner.id, pattern({"yksikkö", "sisatulento"}), name_str
+	), FuncOutput(to_append))
+	
+	pgl(".CMD ::= poista .EXPR-%d{nimento} .EXPR-%d{omanto} %s . -> $2.%s.append($1)" % (
+		vtype.id, owner.id, pattern({"yksikkö", "sisaeronto"}), name_str
+	), FuncOutput(to_remove))
+	
+	for named_code in ["", "( .* )"]:
+		pgl(".CMD ::= toista jokaiselle .PATTERN-%d{ulkotulento} %s .EXPR-%d{omanto} %s : -> for each $1 in $2.%s:" % (
+			vtype.id, named_code, owner.id, pattern({"yksikkö", "sisaolento"}), name_str
+		), FuncOutput(lambda *p: ForParser(name_str, *p)))
+	
+	pgl(".COND ::= .EXPR-%d{omanto} %s sisältää .EXPR-%d{omanto} -> $1.%s.contains($2)" % (
+		owner.id, pattern({"yksikkö", "nimento"}), vtype.id, name_str
+	), FuncOutput(lambda obj, val: (f'({val} in {obj}.data[{repr(name_str)}])', to_append(val, obj))))
+	
+	pgl(".COND ::= .EXPR-%d{omanto} %s ei sisällä .EXPR-%d{osanto} -> !$1.%s.contains($2)" % (
+		owner.id, pattern({"yksikkö", "nimento"}), vtype.id, name_str
+	), FuncOutput(lambda obj, val: (f'({val} not in {obj}.data[{repr(name_str)}])', to_remove(val, obj))))
+
 # Adjektiivit
 
-def addBitPhrase(clazz, name_code, name_str, name_strs):
-	pgl(".PATTERN-%d ::= %s .PATTERN-%d{$} -> %s($1)" % (clazz.id, name_code, clazz.id, name_str),
+def addBitPatternPhrase(owner, clazz, name_code, name_str, name_strs):
+	pgl(".PATTERN-%d ::= %s .PATTERN-%d{$} -> %s($1)" % (clazz.id, name_code, owner.id, name_str),
 		FuncOutput(lambda p: p.bitsOff(name_strs).bitOn(name_str)))
-	pgl(".CLASS-PATTERN-%d ::= %s .PATTERN-%d{$} -> %s($1)" % (clazz.id, name_code, clazz.id, name_str),
+
+def addBitClassPatternPhrase(clazz, name_code, name_str, name_strs):
+	pgl(".CLASS-PATTERN-%d ::= %s .CLASS-PATTERN-%d{$} -> %s($1)" % (clazz.id, name_code, clazz.id, name_str),
 		FuncOutput(lambda p: p.bitsOff(name_strs).bitOn(name_str)))
 
 def defineBit(owner, *names):
@@ -263,11 +306,20 @@ def defineBit(owner, *names):
 		), FuncOutput(lambda c: c.bitOn(name_str)))
 
 		for clazz in owner.subclasses():
-			addBitPhrase(clazz, name_code, name_str, name_strs)
+			addBitPatternPhrase(clazz, clazz, name_code, name_str, name_strs)
+			addBitClassPatternPhrase(clazz, name_code, name_str, name_strs)
+		
+		if owner.superclass:
+			for clazz in owner.superclass.superclasses():
+				addBitPatternPhrase(owner, clazz, name_code, name_str, name_strs)
 		
 		pgl(".CMD ::= .EXPR-%d{nimento} on nyt %s . -> $1.%s = True" % (
 			owner.id, name_code_nominative, name_str
 		), FuncOutput(lambda obj: f'obj.bitsOff({repr(name_strs)}).bitOn({repr(name_str)})'))
+		
+		pgl(".COND ::= .EXPR-%d{nimento} on %s -> $1.%s == True" % (
+			owner.id, name_code_nominative, name_str
+		), FuncOutput(lambda obj: (f'{repr(name_str)} in {obj}.bits', f'{obj}.bitsOff({repr(name_strs)}).bitOn({repr(name_str)})')))
 		
 	for name, name_str, name_code in zip(names, name_strs, name_codes):
 		addBitPhrases(name, name_str, name_code)
@@ -278,20 +330,176 @@ pgl(".ENUM-DEF ::= .CLASS{nimento} on joko .* tai .* . -> $1 has bits $2==!$3", 
 pgl(".ENUM-DEF ::= .CLASS{nimento} on joko .* , .* tai .* . -> $1 has bits $2==!($3|$4)", FuncOutput(defineBit))
 pgl(".DEF ::= .ENUM-DEF -> $1", identity)
 
+# Ehdot
+
+pgl(".COND ::= .COND ja .COND -> $1 and $2", FuncOutput(lambda x, y: (f'({x[0]} and {y[0]})', f'({x[1]},{y[1]})')))
+pgl(".COND ::= .COND , .COND ja .COND -> $1 and $2", FuncOutput(lambda x, y, z: (f'({x[0]} and {y[0]} and {z[0]})', f'({x[1]},{y[1]},{z[1]})')))
+
+def defineCondition(grammar, is_adv, cases, nameds, first_named, owner, *args):
+	args = list(args)
+	cond_codes = args[-1]
+	if first_named:
+		first_name = args[0]
+		del args[0]
+	else:
+		first_name = None
+	pre = args[0]
+	params = []
+	i = 1
+	j = 0
+	while i < len(args)-1:
+		if nameds[j]:
+			params.append((args[i], args[i+2], args[i+1]))
+		else:
+			params.append((args[i], args[i+1], None))
+		i += 3 if nameds[j] else 2
+		j += 1
+	
+	tmp_vars = [f"_{i}" for i in range(len(params)+1)]
+	
+	grammar = grammar.copy()
+	addParamPhrases(grammar, tmp_vars[0], owner, first_name)
+	for case, (vtype, _, name), tmp_var in zip(cases, params, tmp_vars[1:]):
+		addParamPhrases(grammar, tmp_var, vtype, name)
+	
+	# luodaan check- ja modify -koodit ja yhdistetään ne tupleiksi
+	checks, modifys = [], []
+	for cond_code in cond_codes:
+		alts = grammar.matchAll(cond_code, "COND", set())
+		if len(alts) != 1:
+			sys.stderr.write("Monitulkintainen ehtolause: " + tokensToString(cond_code) + ". Vaihtoehdot: " + repr(alts) + "\n")
+			return
+		check, modify = alts[0][0]()
+		checks.append(check)
+		modifys.append(modify)
+	
+	check = "(" + ", ".join(checks) + ")"
+	modify = "(" + ", ".join(modifys) + ")"
+	
+	name_str = " ".join([tokensToString(pre)] + [
+		"- %s" % (tokensToString(post),) for _, post, _ in params
+	])
+	
+	pattern = " ".join([tokensToCode(pre)] + [
+		".EXPR-%d{%s} %s" % (vtype.id, case, tokensToCode(post)) for case, (vtype, post, _) in zip(cases, params)
+	])
+	
+	make_tuple = lambda content, p: ", ".join([
+		"pushStackFrame()",
+	] + [f"putVar({repr(tmp_var)}, {a})" for tmp_var, a in zip(tmp_vars, p)] + [
+		content,
+		"popStackFrame()",
+	])
+	
+	pgl(".COND ::= .EXPR-%d{nimento} on %s -> $1~%s" % (owner.id, pattern, name_str),
+		FuncOutput(lambda *p: ("(" + make_tuple(check, p) + ")[-2]", "(" + make_tuple(modify, p) + ")")))
+	
+	# adjektiivisuus päätellään viimeisen sanan perusteella
+	if len(pre) == 0 and (len(params) == 0 or len(params[-1][1]) == 0):
+		is_adjective = False
+	else:
+		last_token = pre[-1] if len(params) == 0 else params[-1][1][-1]
+		is_adjective = not is_adv and ("laatusana" in last_token.bits() or "nimisana_laatusana" in last_token.bits()) and "nimento" in last_token.bits()
+	
+	# adjektiivisen ja adverbiaalisen fraasin yhteinen funktio
+	func = lambda *p: p[-1].addCondition(RCondition(
+		"_obj", "(" + make_tuple(check, ("_obj",)+p[:-1]) + ")[-2]", "(" + make_tuple(modify, ("_obj",)+p[:-1]) + ")"
+	))
+	
+	# yhteinen output-merkkijonon osa
+	output_str = name_str + "(" + ", ".join([f"${n}" for n in range(len(params)+1)]) + ")"
+	
+	if is_adjective:
+		def addAttributePhrase(owner, clazz):
+			pgl(".PATTERN-%d ::= %s .PATTERN-%d{$} -> %s" % (clazz.id, pattern, owner.id, output_str), FuncOutput(func))
+			if owner is clazz: # ehto tarvitaan, ettei tätä lisättäisi kahdesti (alempana kahdessa for-silmukassa)
+				pgl(".CLASS-PATTERN-%d ::= %s .CLASS-PATTERN-%d{$} -> %s" % (clazz.id, pattern, clazz.id, output_str), FuncOutput(func))
+	else:
+		def addAttributePhrase(owner, clazz):
+			pgl(".PATTERN-%d ::= %s oleva{$} .PATTERN-%d{$} -> %s" % (clazz.id, pattern, clazz.id, output_str), FuncOutput(func))
+			if owner is clazz:
+				pgl(".CLASS-PATTERN-%d ::= %s oleva{$} .CLASS-PATTERN-%d{$} -> %s" % (clazz.id, pattern, clazz.id, output_str), FuncOutput(func))
+				pgl(".CLASS-PATTERN-WITH-ADV-%d ::= .CLASS-PATTERN-%d %s -> %s" % (clazz.id, clazz.id, pattern, output_str),
+					FuncOutput(lambda *p: p[0].addCondition(RCondition(
+						"_obj", "(" + make_tuple(check, ("_obj",)+p[1:]) + ")[-2]", "(" + make_tuple(modify, ("_obj",)+p[1:]) + ")"
+					))))
+	
+	if owner.superclass:
+		for clazz in owner.superclass.superclasses():
+			addAttributePhrase(owner, clazz)
+	
+	for clazz in owner.subclasses():
+		addAttributePhrase(clazz, clazz)
+	
+	owner.attributePhraseAdders.append(addAttributePhrase)
+
+class ConditionParser:
+	def __init__(self, *p):
+		self.args = p
+	def parse(self, file, grammar):
+		lines = []
+		while True:
+			line = file.readline()
+			if not line.strip():
+				break
+			lines.append(tokenize(line))
+		return defineCondition(grammar, *self.args, lines)
+
+def addConditionDefPatterns(cases):
+	for first_named, *nameds in itertools.product(*[[False, True]]*(len(cases)+1)):
+		addConditionDefPattern(cases, first_named, nameds)
+
+def addConditionDefPattern(cases, first_named, nameds):
+	fname = "" if not first_named else "( .* )"
+	pattern = " ".join(["[ .CLASS{%s} %s ] .**" % (case, "" if not named else "( .* )") for case, named in zip(cases,nameds)])
+	pgl(".COND-DEF ::= Määritelmä . Kun .CLASS{nimento} %s on \" .** %s \" : -> def $1~ $*:" % (fname, pattern),
+		FuncOutput(lambda *p: ConditionParser(False, cases, nameds, first_named, *p)))
+
+for i in [0,1,2]:
+	for cases in itertools.product(*[CASES]*i):
+		addConditionDefPatterns(cases)
+
+pgl(".DEF ::= .COND-DEF -> $1", identity)
+
 # Muuttujat
 
-def defineVariable(name, pattern):
+def defineVariable(name, class_pattern):
 	name_str = tokensToString(name)
-	vtype = pattern.type()
-	GLOBAL_SCOPE.variables[name_str] = vtype.newInstance(name_str, bits=pattern.bits, name_tokens=name)
+	pattern = lambda bits: nameToCode(name, bits, rbits={"yksikkö", "nimento"})
+	
+	vtype = class_pattern.type()
+	GLOBAL_SCOPE.variables[name_str] = class_pattern.newInstance(name)
+	
+	to_get = lambda: f'getVar({repr(name_str)})'
+	to_set = lambda x: f'setVar({repr(name_str)}, {x})'
+	
 	for clazz in vtype.superclasses():
-		pgl(".EXPR-%d ::= %s -> %s" % (clazz.id, nameToCode(name, rbits={"yksikkö", "nimento"}), name_str),
-			FuncOutput(lambda: f'getVar({repr(name_str)})'))
-	pgl(".CMD ::= %s on nyt EXPR-%d{nimento} . -> %s = $1" % (nameToCode(name, {"nimento"}, rbits={"yksikkö", "nimento"}), vtype.id, name_str),
-		FuncOutput(lambda x: f'setVar({repr(name_str)}, {x})'))
+		pgl(".EXPR-%d ::= %s -> %s" % (clazz.id, pattern({"$"}), name_str),
+			FuncOutput(to_get))
+	
+	pgl(".CMD ::= %s on nyt EXPR-%d{nimento} . -> %s = $1" % (pattern({"yksikkö", "nimento"}), vtype.id, name_str),
+		FuncOutput(to_set))
+	
+	pgl(".COND ::= %s on .EXPR-%d{nimento} -> %s==$2" % (
+		pattern({"yksikkö", "nimento"}), vtype.id, name_str
+	), FuncOutput(lambda x: (f'{to_get()}.equals({x})', to_set(x))))
 
 pgl(".VARIABLE-DEF ::= .* on .CLASS-PATTERN{nimento} . -> $1 : $2", FuncOutput(defineVariable))
 pgl(".DEF ::= .VARIABLE-DEF -> $1", identity)
+
+# Apufunktio
+
+def addParamPhrases(grammar, case, vtype, name):
+	if name:
+		for clazz in vtype.superclasses():
+			grammar.parseGrammarLine(".EXPR-%d ::= %s -> %s param" % (
+				clazz.id, nameToCode(name, rbits={"yksikkö", "nimento"}), vtype.name
+			), FuncOutput(lambda: f'getVar({repr(case)})'))
+	else:
+		pronoun = "hän" if "inhimillinen" in vtype.bits else "se"
+		for clazz in vtype.superclasses():
+			grammar.parseGrammarLine(".EXPR-%d ::= %s{$} -> %s param" % (clazz.id, pronoun, vtype.name),
+				FuncOutput(lambda: f'getVar({repr(case)})'))
 
 # Toiminnot
 
@@ -301,23 +509,11 @@ class ListenerParser:
 		self.params = self.args[1]
 	def parse(self, file, grammar):
 		grammar = grammar.copy()
-		for c, p, n in self.params:
-			self.createParamPhrases(grammar, c, p, n)
+		for i, (c, p, n) in enumerate(self.params):
+			addParamPhrases(grammar, f"_{i}", p.type(), n)
 		grammar.parseGrammarLine(".CMD ::= keskeytä toiminto . -> stop", FuncOutput(lambda: 'SCOPE[-1].bitOn("stop action")')) # suoritetaan isäntäscopessa
 		body = parseBlock(file, grammar)
 		return RListener(*self.args, body)
-	def createParamPhrases(self, grammar, c, p, n):
-		vtype = p.type()
-		if n:
-			for clazz in vtype.superclasses():
-				grammar.parseGrammarLine(".EXPR-%d ::= %s -> %s param" % (
-					clazz.id, nameToCode(n, rbits={"yksikkö", "nimento"}), vtype.name
-				), FuncOutput(lambda: f'getVar("_"+{repr(c)})'))
-		else:
-			pronoun = "hän" if "inhimillinen" in vtype.bits else "se"
-			for clazz in vtype.superclasses():
-				grammar.parseGrammarLine(".EXPR-%d ::= %s{$} -> %s param" % (clazz.id, pronoun, vtype.name),
-					FuncOutput(lambda: f'getVar("_"+{repr(c)})'))
 
 def defineAction(name, params, pre, post):
 	action = RAction(name)
@@ -445,6 +641,26 @@ pgl('.EXPR-%d ::= rivinvaihto{$} -> "\\n"' % (merkkijono.id,), FuncOutput(lambda
 pgl('.EXPR-%d ::= .EXPR-%d{$} isolla alkukirjaimella -> capitalize($1)' % (merkkijono.id, merkkijono.id),
 	FuncOutput(lambda x: f'createStringObj({x}.extra["str"].capitalize())'))
 
+# For-silmikka
+
+class ForParser:
+	def __init__(self, field_name, *args):
+		self.field_name = field_name
+		self.args = args
+	def parse(self, file, grammar):
+		grammar = grammar.copy()
+		
+		param_pattern = self.args[0]
+		param_name = None if len(self.args) == 2 else self.args[1]
+		obj = self.args[-1]
+		
+		addParamPhrases(grammar, "_val", param_pattern.type(), param_name)
+		
+		block = parseBlock(file, grammar)
+		block_str = "lambda: (" + ", ".join(block) + ")"
+		
+		return '%s.forSet(%s, %s, %s, %s)' % (obj, repr(self.field_name), repr("_val"), param_pattern.toPython(), block_str)
+
 # Tulostaminen
 
 pgl(".CMD ::= sano .EXPR-%d{nimento} . -> print($1)" % (asia.id,), FuncOutput(lambda x: f'say({x}.asString())'))
@@ -462,7 +678,7 @@ def parseBlock(file, grammar):
 			sys.stderr.write("Virhe jäsennettäessä riviä `" + line.strip() + "'. Vaihtoehdot: " + ", ".join([a[1] for a in alternatives]) + "\n")
 			break
 		if alternatives[0][1][-1] == ":":
-			ans.append(alternatives[0][0].parse(f, grammar))
+			ans.append(alternatives[0][0]().parse(file, grammar))
 		else:
 			ans.append(alternatives[0][0]())
 	return ans
@@ -584,9 +800,10 @@ def interactive():
 			setDebug(3)
 			continue
 		elif line == "/virheet":
-			if len(ERRORS) > 0:
+			errors = ERROR_STACK[-1]
+			if len(errors) > 0:
 				print("Mahdollisia virheitä:")
-				for error in ERRORS:
+				for error in errors:
 					print(error+"\n")
 			else:
 				print("Ei virheitä.")
@@ -595,6 +812,7 @@ def interactive():
 			args = line[6:].strip()
 			cat = args[:args.index(" ")]
 			expr = args[args.index(" ")+1:]
+			print(f"Matching `{expr}' ~ .{cat}")
 			ints = GRAMMAR.matchAll(tokenize(expr), cat, set())
 			for _, string in ints:
 				print(string)
@@ -603,8 +821,11 @@ def interactive():
 			print(eval(line[5:].strip()))
 			continue
 		elif line.startswith("/lataa"):
-			with open(line[6:].strip()) as f:
-				loadFile(f)
+			try:
+				with open(line[6:].strip()) as f:
+					loadFile(f)
+			except:
+				traceback.print_exc()
 			printStatistics()
 			continue
 		elif line == "/käännä":
@@ -619,7 +840,8 @@ def interactive():
 		elif line.startswith("/määrittelytila"):
 			mode = ["DEF", "CMD", "PLAYER-CMD"]
 			continue
-		del ERRORS[:]
+		del ERROR_STACK[:]
+		ERROR_STACK.append([])
 		phrase_type = mode[0]
 		if line[0] in mode_chars:
 			phrase_type = mode[mode_chars.index(line[0])+1]
@@ -631,11 +853,14 @@ def interactive():
 		elif len(interpretations) == 1:
 			if not silent:
 				print(interpretations[0][1])
-			string = interpretations[0][0]()
-			if not silent:
-				print(string)
-			if string:
-				eval(string)
+			try:
+				string = interpretations[0][0]()
+				if not silent:
+					print(string)
+				if string:
+					eval(string)
+			except:
+				traceback.print_exc()
 		else:
 			print("Löydetty", len(interpretations), "tulkintaa:")
 			for _, interpretation in interpretations:

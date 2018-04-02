@@ -96,6 +96,9 @@ class RObject(Bits):
 			] + [
 				f'{var}.data[{repr(key)}] = {{ {", ".join(["OBJECTS[" + repr(keykey.id) + "]: OBJECTS[" + str(self.data[key][keykey].id) + "]" for keykey in self.data[key]])} }}'
 				for key in self.data if isinstance(self.data[key], dict)
+			] + [
+				f'{var}.data[{repr(key)}] = {{ {", ".join(["OBJECTS[" + str(val.id) + "]" for val in self.data[key]])} }}'
+				for key in self.data if isinstance(self.data[key], set)
 			])
 		)
 	def get(self, field_name):
@@ -124,6 +127,24 @@ class RObject(Bits):
 		if field_name not in self.data:
 			self.data[field_name] = {}
 		self.data[field_name][key] = val
+	def appendSet(self, field_name, val):
+		if field_name not in self.data:
+			self.data[field_name] = set()
+		self.data[field_name].add(val)
+	def removeSet(self, field_name, val):
+		if field_name not in self.data:
+			return
+		if val in self.data[field_name]:
+			self.data[field_name].remove(val)
+	def forSet(self, field_name, var_name, pattern, f):
+		if field_name not in self.data:
+			return
+		pushScope()
+		for val in self.data[field_name]:
+			if pattern.matches(val):
+				putVar(var_name, val)
+				f()
+		popScope()
 	def setExtra(self, name, data):
 		self.extra[name] = data
 		return self
@@ -171,13 +192,15 @@ class RClass(Bits):
 		self.direct_subclasses = []
 		self.fields = {}
 		self.bit_groups = bit_groups or []
+		self.attributePhraseAdders = []
 		
 		if superclass:
 			self.superclass.direct_subclasses.append(self)
 	def toPython(self):
 		sc = "None" if self.superclass is None else f"CLASSES[{repr(self.superclass.name)}]"
+		grammar = "" if self.superclass is None else f'GRAMMAR.parseGrammarLine(".EXPR-{self.superclass.id} ::= .EXPR-{self.id}{{$}}", identity)'
 		return (
-			f'RClass({repr(self.name)}, {sc}, {repr(self.name_tokens)}, {repr(self.id)}, {repr(self.bit_groups)}, {repr(self.bits)})',
+			f'RClass({repr(self.name)}, {sc}, {repr(self.name_tokens)}, {repr(self.id)}, {repr(self.bit_groups)}, {repr(self.bits)});{grammar}',
 			";".join(f'CLASSES[{repr(self.name)}].fields[{repr(field)}] = {self.fields[field].toPythonExpr()}' for field in self.fields)
 		)
 	def addField(self, name, field):
@@ -221,18 +244,49 @@ class RField:
 		return RField(self.id, self.name, self.type, None, self.is_map)
 
 class RPattern(Bits):
-	def __init__(self, rclass=None, bits=None):
+	def __init__(self, rclass=None, bits=None, conditions=None):
 		Bits.__init__(self, bits)
 		self.rclass = rclass
+		self.conditions = conditions or []
 	def toPython(self):	
-		return "RPattern(CLASSES[" + repr(self.rclass.name) + "], " + repr(self.bits) + ")"
+		return "RPattern(CLASSES[" + repr(self.rclass.name) + "], " + repr(self.bits) + "," + toPython(self.conditions) + ")"
+	def addCondition(self, cond):
+		self.conditions.append(cond)
+		return self
+	def newInstance(self, name):
+		name_str = tokensToString(name)
+		obj = self.rclass.newInstance(name=name_str, name_tokens=name, bits=self.bits)
+		for cond in self.conditions:
+			cond.doModify(obj)
+		return obj
 	def matches(self, obj):
 		if self.rclass:
 			if obj.rclass not in self.rclass.subclasses():
 				return False
+		for cond in self.conditions:
+			if not cond.doCheck(obj):
+				return False
 		return obj.bits >= self.bits
 	def type(self):
 		return self.rclass or CLASSES["asia"]
+
+class RCondition:
+	def __init__(self, var, check, modify):
+		self.var = var
+		self.check = check
+		self.modify = modify
+	def toPython(self):
+		return "RCondition(" + repr(self.var) + ", lambda " + self.var + ": " + self.check + ", lambda " + self.var + ": " + self.modify + ")"
+	def doCheck(self, x):
+		if isinstance(self.check, str):
+			return eval(self.check, globals(), {self.var: x})
+		else:
+			return self.check(x)
+	def doModify(self, x):
+		if isinstance(self.modify, str):
+			return eval(self.modify, globals(), {self.var: x})
+		else:
+			return self.modify()
 
 # Näkyvyysalueet ja muuttujat
 
@@ -335,8 +389,8 @@ class RListener:
 		])
 	def run(self, args):
 		pushStackFrame()
-		for (c, _, _), a in zip(self.params, args):
-			putVar("_"+c, a)
+		for i, ((c, _, _), a) in enumerate(zip(self.params, args)):
+			putVar(f"_{i}", a)
 		for cmd in self.body:
 			if isinstance(cmd, str):
 				eval(cmd)
@@ -365,13 +419,25 @@ def createStringObj(x):
 
 # Tulostaminen
 
+prev_was_newline = True
+
 def say(text):
-	print(text)
+	global prev_was_newline
+	if not text:
+		return
+	if not prev_was_newline:
+		print(" ", end="")
+	print(text,end="")
+	prev_was_newline = text[-1] == "\n"
 
 # Pelin komentotulkki
 
 def playGame(grammar):
+	global prev_was_newline
 	while True:
+		if not prev_was_newline:
+			print()
+			prev_was_newline = True
 		line = input(">> ")
 		interpretations = grammar.matchAll(tokenize(line), "PLAYER-CMD", set())
 		if len(interpretations) == 0:
