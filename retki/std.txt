@@ -1,7 +1,0 @@
-> Asian nimi koodissa on sen muuttujan nimi, jonka määrittelyn yhteydessä olio luotiin.
-
-Asialla on nimi koodissa, joka on merkkijono.
-
-> Inhimillisyys
-
-Asia voi olla inhimillinen.
