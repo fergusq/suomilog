@@ -2,7 +2,7 @@ from setuptools import setup
 
 setup(
 	name='suomilog',
-	version='0.1',
+	version='0.2',
 	description='Collection of natural language parsing utilities',
 	url='http://github.com/fergusq/suomilog',
 	author='Iikka Hauhio',
