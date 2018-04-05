@@ -225,7 +225,8 @@ class Pattern:
 			
 			errors = "\n\n".join(ERROR_STACK.pop())
 			if len(match) == 0:
-				makeErrorMessage(w, tokens, groups[w][0], len(groups[w][1]))
+				if len(groups[w][1]) != len(tokens):
+					makeErrorMessage(w, tokens, groups[w][0], len(groups[w][1]))
 				if len(errors) > 0:
 					collective_error = w.name + " does not match because:\n " + errors.replace("\n", "\n ")
 					ERROR_STACK[-1].append(collective_error)
