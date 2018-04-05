@@ -14,6 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <http://www.gnu.org/licenses/>.
 
+import sys
 import re
 import itertools
 from copy import deepcopy
@@ -80,6 +81,7 @@ class StringOutput:
 class Grammar:
 	def __init__(self, patterns=None):
 		self.patterns = patterns or {}
+		self.names = {}
 	def print(self):
 		for category in sorted(self.patterns):
 			print(category, "::=")
@@ -100,6 +102,16 @@ class Grammar:
 		if category not in self.patterns:
 			return False
 		return any([pattern.allowsEmptyContent() for pattern in self.patterns[category]])
+	def addCategoryName(self, category, name):
+		self.names[category] = name
+	def refToString(self, ref):
+		if ref.name in self.names:
+			name = self.names[ref.name]
+		else:
+			name = ref.name
+		if ref.bits:
+			name += " (" + ",".join(ref.bits) + ")"
+		return name
 	def parseGrammarLine(self, line, *outputs):
 		if debug_level >= 1:
 			print(line)
@@ -141,6 +153,43 @@ def setDebug(n):
 	global debug_level
 	debug_level = n
 
+class ParsingError:
+	def __init__(self, grammar, ref, place_string, is_part, causes):
+		self.grammar = grammar
+		self.ref = ref
+		self.place_string = place_string
+		self.is_part = is_part
+		self.causes = causes
+	def print(self, finnish=False, file=sys.stderr):
+		global indent
+		ref_str = self.grammar.refToString(self.ref)
+		if self.is_part:
+			string = ("\n"+self.place_string).replace("\n", "\n"+"  "*indent)[1:]
+			if finnish:
+				print(string + "tämän pitäisi olla " + ref_str, file=file)
+			else:
+				print(string + "expected " + ref_str, file=file)
+		if self.causesContainPartErrors():
+			if finnish:
+				print("  "*indent+"lauseke ei voi olla "+ref_str+" koska:", file=file)
+			else:
+				print("  "*indent+ref_str+" does not match because:", file=file)
+			indent += 1
+			causes = list(filter(ParsingError.containsPartErrors, self.causes))
+			for cause in causes[:5]:
+				cause.print(finnish=finnish)
+				print(file=file)
+			if len(causes) > 5:
+				if finnish:
+					print("  "*indent+"+ " + str(len(self.causes)-5) + " muuta mahdollista virhettä", file=file)
+				else:
+					print("  "*indent+"+ " + str(len(self.causes)-5) + " more errors", file=file)
+			indent -= 1
+	def causesContainPartErrors(self):
+		return any([cause.containsPartErrors() for cause in self.causes])
+	def containsPartErrors(self):
+		return self.is_part or self.causesContainPartErrors()
+
 ERROR_STACK = [[]]
 
 def makeErrorMessage(ref, tokens, start, length):
@@ -162,9 +211,7 @@ def makeErrorMessage(ref, tokens, start, length):
 			line2 += char * len(token.token)
 		if i < start:
 			line3 += " " * len(token.token)
-		elif i == start:
-			line3 += "expected " + ref.toCode()
-	ERROR_STACK[-1].append(line1 + "\n" + line2 + "\n" + line3)
+	return line1 + "\n" + line2 + "\n" + line3
 
 class Pattern:
 	def __init__(self, name, words, output):
@@ -223,13 +270,16 @@ class Pattern:
 			
 			match = grammar.matchAll(groups[w][1], w.name, (w.bits-{"$"})|(bits if "$" in w.bits else set()))
 			
-			errors = "\n\n".join(ERROR_STACK.pop())
+			errors = ERROR_STACK.pop()
 			if len(match) == 0:
-				if len(groups[w][1]) != len(tokens):
-					makeErrorMessage(w, tokens, groups[w][0], len(groups[w][1]))
-				if len(errors) > 0:
-					collective_error = w.name + " does not match because:\n " + errors.replace("\n", "\n ")
-					ERROR_STACK[-1].append(collective_error)
+				error = ParsingError(
+					grammar,
+					w,
+					makeErrorMessage(w, tokens, groups[w][0], len(groups[w][1])),
+					len(groups[w][1]) != len(tokens),
+					errors
+				)
+				ERROR_STACK[-1].append(error)
 			
 			args.append(match)
 		ans = ans+[self.output.eval(c) for c in itertools.product(*args)]
