@@ -26,14 +26,26 @@ def tokenize(text):
 	for token in voikko.tokens(text):
 		if token.tokenType == lv.Token.WHITESPACE:
 			continue
+		if "-" in token.tokenText:
+			index = token.tokenText.rindex("-")+1
+			lastPart = token.tokenText[index:]
+			baseformPrefix = token.tokenText[:index].lower()
+		else:
+			lastPart = token.tokenText
+			baseformPrefix = ""
 		alternatives = []
 		for word in voikko.analyze(token.tokenText):
 			if "BASEFORM" in word:
 				alternatives.append(baseformAndBits(word))
+		# Jos jäsennys epäonnistui, koetetaan jäsennystä vain viimeisen palan kautta
+		if len(alternatives) == 0 and baseformPrefix:
+			for word in voikko.analyze(lastPart):
+				if "BASEFORM" in word:
+					alternatives.append(baseformAndBits(word, baseformPrefix))
 		tokens.append(pp.Token(token.tokenText, alternatives))
 	return tokens
 
-def baseformAndBits(word):
+def baseformAndBits(word, baseformPrefix=None):
 	bits = set()
 	addBits(word, bits, "NUMBER", {"singular": "yksikkö", "plural": "monikko"})
 	addBits(word, bits, "SIJAMUOTO")
@@ -50,7 +62,10 @@ def baseformAndBits(word):
 		"conditional": "konditionaali",
 		"potential": "potentiaali"
 	})
-	return word["BASEFORM"].lower(), bits
+	if not baseformPrefix:
+		return word["BASEFORM"].lower(), bits
+	else:
+		return baseformPrefix + word["BASEFORM"].lower(), bits
 
 def addBits(word, bits, name, table=None):
 	if name in word:
