@@ -1,5 +1,5 @@
 # Suomilog
-# Copyright (C) 2018 Iikka Hauhio
+# Copyright (C) 2019 Iikka Hauhio
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -62,6 +62,8 @@ def baseformAndBits(word, baseformPrefix=None):
 		"conditional": "konditionaali",
 		"potential": "potentiaali"
 	})
+	if word["CLASS"] == "lukusana" and ("SIJAMUOTO" not in word or not word["SIJAMUOTO"]):
+		bits.add("nimento")
 	if not baseformPrefix:
 		return word["BASEFORM"].lower(), bits
 	else:
