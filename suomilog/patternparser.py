@@ -18,6 +18,7 @@ import sys
 import re
 import itertools
 from copy import deepcopy
+from collections import defaultdict
 
 class Token:
 	def __init__(self, token, alternatives):
@@ -160,16 +161,33 @@ def setDebug(n):
 	global debug_level
 	debug_level = n
 
+def groupCauses(causes):
+	a = []
+	groups = defaultdict(list)
+	for cause in causes:
+		if cause.is_part and not cause.causesContainPartErrors():
+			groups[(id(cause.grammar), cause.place_string)].append(cause)
+		else:
+			a.append(cause)
+	
+	for group in groups.values():
+		refs = []
+		for cause in group:
+			refs += cause.refs
+		a.append(ParsingError(group[0].grammar, refs, group[0].place_string, True, []))
+	
+	return a
+
 class ParsingError:
-	def __init__(self, grammar, ref, place_string, is_part, causes):
+	def __init__(self, grammar, refs, place_string, is_part, causes):
 		self.grammar = grammar
-		self.ref = ref
+		self.refs = refs
 		self.place_string = place_string
 		self.is_part = is_part
-		self.causes = causes
+		self.causes = groupCauses(causes)
 	def print(self, finnish=False, file=sys.stderr):
 		global indent
-		ref_str = self.grammar.refToString(self.ref)
+		ref_str = (" tai " if finnish else " or ").join(map(self.grammar.refToString, self.refs))
 		if self.is_part:
 			string = ("\n"+self.place_string).replace("\n", "\n"+"  "*indent)[1:]
 			if finnish:
@@ -281,7 +299,7 @@ class Pattern:
 			if len(match) == 0:
 				error = ParsingError(
 					grammar,
-					w,
+					[w],
 					makeErrorMessage(w, tokens, groups[w][0], len(groups[w][1])),
 					len(groups[w][1]) != len(tokens),
 					errors
@@ -289,6 +307,9 @@ class Pattern:
 				ERROR_STACK[-1].append(error)
 			
 			args.append(match)
+			
+			if len(match) == 0:
+				break
 		ans = ans+[self.output.eval(c) for c in itertools.product(*args)]
 		
 		if debug_level >= 2:
