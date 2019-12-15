@@ -89,6 +89,13 @@ class Grammar:
 				print(" " + pattern.toCode())
 	def copy(self):
 		return Grammar({name: self.patterns[name].copy() for name in self.patterns}, self.names.copy())
+	def update(self, grammar):
+		for category in grammar.patterns:
+			if category in self.patterns:
+				self.patterns[category] += grammar.patterns[category]
+			else:
+				self.patterns[category] = grammar.patterns[category].copy()
+		self.names.update(grammar.names)
 	def matchAll(self, tokens, category, bits):
 		if category not in self.patterns:
 			return []
