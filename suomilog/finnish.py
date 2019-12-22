@@ -15,9 +15,12 @@
 # along with this program. If not, see <http://www.gnu.org/licenses/>.
 
 import re
+from collections import defaultdict
 from voikko import libvoikko as lv
 from voikko.inflect_word import inflect_word
 from . import patternparser as pp
+
+DICTIONARY = defaultdict(list)
 
 voikko = lv.Voikko("fi-x-morpho")
 
@@ -42,6 +45,9 @@ def tokenize(text):
 			for word in voikko.analyze(lastPart):
 				if "BASEFORM" in word:
 					alternatives.append(baseformAndBits(word, baseformPrefix))
+		# Jos sana löytyy suomilogin omasta sanakirjasta, lisää myös sieltä vaihtoehdot
+		if token.tokenText.lower() in DICTIONARY:
+			alternatives += DICTIONARY[token.tokenText.lower()]
 		tokens.append(pp.Token(token.tokenText, alternatives))
 	return tokens
 
@@ -76,6 +82,11 @@ def addBits(word, bits, name, table=None):
 				bits.add(table[word[name]])
 		else:
 			bits.add(word[name])
+
+def addNounToDictionary(noun):
+	for plural in [False, True]:
+		for case in CASES:
+			DICTIONARY[inflect(noun, case, plural).lower()].append((noun, {case, "monikko" if plural else "yksikkö"}))
 
 CASES = [
 	"nimento",
