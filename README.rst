@@ -79,6 +79,7 @@ potentiaali   potential        nähnet
 1             first person     näen
 2             second person    näet
 3             third person     näkee
+============= ================ ======
 
 The function ``suomilog.finnish.tokenize(text)`` is used to tokenize words::
 
