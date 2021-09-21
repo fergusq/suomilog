@@ -15,13 +15,12 @@
 # along with this program. If not, see <http://www.gnu.org/licenses/>.
 
 import sys
-import re
 import itertools
-from copy import deepcopy
 from collections import defaultdict
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 class Token:
-	def __init__(self, token, alternatives):
+	def __init__(self, token: str, alternatives: List[Tuple[str, Set[str]]]):
 		self.token = token
 		self.alternatives = alternatives
 	def __repr__(self):
@@ -34,10 +33,10 @@ class Token:
 		return any([any([tbf == baseform and tbits >= bits for tbf, tbits in self.alternatives]) for baseform, bits in alternatives])
 	def toAlternatives(self, bits):
 		return [(wbf, (wbits-{"$"})|(bits if "$" in wbits else wbits)) for wbf, wbits in self.alternatives]
-	def baseform(self, *tbits):
-		tbits = set(tbits)
+	def baseform(self, *tbits: str):
+		tbits_set = set(tbits)
 		for baseform, bits in self.alternatives:
-			if tbits <= bits:
+			if tbits_set <= bits:
 				return baseform
 		return None
 	def bits(self):
@@ -47,7 +46,7 @@ class Token:
 		return bits
 
 class PatternRef:
-	def __init__(self, name, bits, unexpanded=None):
+	def __init__(self, name: str, bits: Set[str], unexpanded: Optional["PatternRef"] = None):
 		self.name = name
 		self.bits = bits
 		self.unexpanded = unexpanded
@@ -56,8 +55,12 @@ class PatternRef:
 	def toCode(self):
 		return "." + self.name + ("{" + ",".join(self.bits) + "}" if self.bits else "")
 
-class MultiOutput:
-	def __init__(self, outputs):
+class Output:
+	def eval(self, args: Any) -> Any:
+		raise NotImplementedError()
+
+class MultiOutput(Output):
+	def __init__(self, outputs: List[Output]):
 		self.outputs = outputs
 	def __repr__(self):
 		return "MultiOutput(" + repr(self.outputs) + ")"
@@ -67,8 +70,8 @@ class MultiOutput:
 			ans.append(output.eval([arg[i] for arg in args]))
 		return ans
 
-class StringOutput:
-	def __init__(self, string):
+class StringOutput(Output):
+	def __init__(self, string: str):
 		self.string = string
 	def __repr__(self):
 		return "StringOutput(" + repr(self.string) + ")"
@@ -83,7 +86,7 @@ class StringOutput:
 		return ans
 
 class Grammar:
-	def __init__(self, patterns=None, names=None, checks=None):
+	def __init__(self, patterns: Dict[str, List["Pattern"]] = None, names: Dict[str, str] = None):
 		self.patterns = patterns or {}
 		self.names = names or {}
 	def print(self):
@@ -93,14 +96,14 @@ class Grammar:
 				print(" " + pattern.toCode())
 	def copy(self):
 		return Grammar({name: self.patterns[name].copy() for name in self.patterns}, self.names.copy())
-	def update(self, grammar):
+	def update(self, grammar: "Grammar"):
 		for category in grammar.patterns:
 			if category in self.patterns:
 				self.patterns[category] += grammar.patterns[category]
 			else:
 				self.patterns[category] = grammar.patterns[category].copy()
 		self.names.update(grammar.names)
-	def matchAll(self, tokens, category, bits):
+	def matchAll(self, tokens: List[Token], category: str, bits: Set[str]):
 		if category not in self.patterns:
 			return []
 		
@@ -109,13 +112,13 @@ class Grammar:
 			ans += pattern.match(self, tokens, bits)
 		
 		return ans
-	def allowsEmptyContent(self, category):
+	def allowsEmptyContent(self, category: str):
 		if category not in self.patterns:
 			return False
 		return any([pattern.allowsEmptyContent() for pattern in self.patterns[category]])
-	def addCategoryName(self, category, name):
+	def addCategoryName(self, category: str, name: str):
 		self.names[category] = name
-	def refToString(self, ref):
+	def refToString(self, ref: PatternRef):
 		if ref.name in self.names:
 			name = self.names[ref.name]
 		else:
@@ -123,7 +126,7 @@ class Grammar:
 		if ref.bits:
 			name += " (" + ",".join(ref.bits) + ")"
 		return name
-	def parseGrammarLine(self, line, *outputs):
+	def parseGrammarLine(self, line: str, *outputs: Output):
 		if debug_level >= 1:
 			print(line)
 		tokens = line.replace("\t", " ").split(" ")
@@ -145,12 +148,12 @@ class Grammar:
 				self.patterns[category] = []
 			if "->" in tokens:
 				outputs = outputs + tuple(StringOutput(o) for o in " ".join(tokens[end+1:]).split(" &&& "))
-			pattern = Pattern(category, words, MultiOutput(outputs) if len(outputs) > 1 else outputs[0], bits=bits)
+			pattern = Pattern(category, words, MultiOutput(list(outputs)) if len(outputs) > 1 else outputs[0], bits=bits)
 			self.patterns[category].append(pattern)
 			return pattern
 		else:
 			raise Exception("Syntax error on line `" + line + "'")
-	def expandBits(self, category, bits, expanded=None):
+	def expandBits(self, category: str, bits: Set[str], expanded: Dict[str, List["Pattern"]] = None) -> Dict[str, List["Pattern"]]:
 		if category not in self.patterns:
 			return {}
 		
@@ -165,7 +168,7 @@ class Grammar:
 		
 		return ans
 
-def parseWord(token):
+def parseWord(token: str):
 	if "{" in token and token[-1] == "}":
 		bits = set(token[token.index("{")+1:-1].split(","))
 		token = token[:token.index("{")]
@@ -185,11 +188,11 @@ def parseWord(token):
 debug_level = 0
 indent = 0
 
-def setDebug(n):
+def setDebug(n: int):
 	global debug_level
 	debug_level = n
 
-def groupCauses(causes):
+def groupCauses(causes: List["ParsingError"]) -> List["ParsingError"]:
 	a = []
 	groups = defaultdict(list)
 	for cause in causes:
@@ -207,13 +210,13 @@ def groupCauses(causes):
 	return a
 
 class ParsingError:
-	def __init__(self, grammar, refs, place_string, is_part, causes):
+	def __init__(self, grammar: Grammar, refs: List[PatternRef], place_string: str, is_part: bool, causes: List["ParsingError"]):
 		self.grammar = grammar
 		self.refs = refs
 		self.place_string = place_string
 		self.is_part = is_part
 		self.causes = groupCauses(causes)
-	def print(self, finnish=False, file=sys.stderr):
+	def print(self, finnish: bool = False, file=sys.stderr):
 		global indent
 		ref_str = (" tai " if finnish else " or ").join(map(self.grammar.refToString, self.refs))
 		if self.is_part:
@@ -267,7 +270,7 @@ def makeErrorMessage(ref, tokens, start, length):
 	return line1 + "\n" + line2 + "\n" + line3
 
 class Pattern:
-	def __init__(self, name, words, output, bits=set()):
+	def __init__(self, name: str, words: List[Union[Token, PatternRef]], output: Output, bits: Set[str] = set()):
 		self.name = name
 		self.words = words
 		self.output = output
@@ -280,9 +283,9 @@ class Pattern:
 		return " ".join([w.toCode() for w in self.words])# + " -> " + repr(self.output)
 	def allowsEmptyContent(self):
 		return False
-	def match(self, grammar, tokens, bits, i=0, j=0, g=None):
+	def match(self, grammar: Grammar, tokens: List[Token], bits: Set[str], i=0, j=0, g=None):
 		global indent
-		groups = g or {w: [0, []] for w in self.words if isinstance(w, PatternRef)}
+		groups: Dict[PatternRef, List[Any]] = g or {w: [0, []] for w in self.words if isinstance(w, PatternRef)}
 		ans = []
 		while i <= len(tokens) and j <= len(self.words):
 			token = tokens[i] if i < len(tokens) else Token("<END>", [])
@@ -349,7 +352,7 @@ class Pattern:
 			print("->", ans)
 		
 		return ans
-	def expandBits(self, name, grammar, expanded, bits):
+	def expandBits(self, name: str, grammar: Grammar, expanded: Dict[str, List["Pattern"]], bits: Set[str]):
 		positive_bits = set(bit for bit in bits if not bit.startswith("!"))
 		negative_bits = set(bit[1:] for bit in bits if bit.startswith("!"))
 		if not self.positive_bits <= positive_bits or self.negative_bits & positive_bits or self.positive_bits & negative_bits:

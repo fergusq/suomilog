@@ -5,16 +5,16 @@ from . import patternparser as pp
 
 
 class CYKParser:
-	def __init__(self, grammar):
+	def __init__(self, grammar: pp.Grammar, root_category: str):
 		self.token_rules = {}
 		self.one_rules = defaultdict(set)
 		self.one_rules_expanded = defaultdict(set)
 		self.two_rules = defaultdict(set)
 		self.outputs = {}
 		self.grammar = grammar
-		self.toCNF(grammar)
-	def toCNF(self, grammar: pp.Grammar):
-		eg = grammar.expandBits("SENTENCE", set())
+		self._toCNF(root_category)
+	def _toCNF(self, root_category: str):
+		eg = self.grammar.expandBits(root_category, set())
 		for category in eg:
 			for pattern in eg[category]:
 				if isinstance(pattern, pp.Pattern):
@@ -136,7 +136,7 @@ class CYKParser:
 		for a, b in self.outputs.items():
 			print(repr(a), repr(b))
 
-class DenormalizeStartOutput:
+class DenormalizeStartOutput(pp.Output):
 	def __init__(self, a_is_pattern: bool, b_is_pattern: bool):
 		self.a_is_pattern = a_is_pattern
 		self.b_is_pattern = b_is_pattern
@@ -156,7 +156,7 @@ class DenormalizeStartOutput:
 		else:
 			return ()
 
-class DenormalizeChainOutput:
+class DenormalizeChainOutput(pp.Output):
 	def __init__(self, a_is_pattern: bool):
 		self.a_is_pattern = a_is_pattern
 	def __repr__(self):
@@ -169,7 +169,7 @@ class DenormalizeChainOutput:
 		else:
 			return args[1]
 
-class DenormalizeEndOutput:
+class DenormalizeEndOutput(pp.Output):
 	def __init__(self, a_is_pattern: bool, output):
 		self.a_is_pattern = a_is_pattern
 		self.output = output
