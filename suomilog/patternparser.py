@@ -32,6 +32,8 @@ class Token:
 		return self.token or "/".join([baseform + "{" + ",".join(bits) + "}" for baseform, bits in self.alternatives])
 	def containsMatch(self, alternatives):
 		return any([any([tbf == baseform and tbits >= bits for tbf, tbits in self.alternatives]) for baseform, bits in alternatives])
+	def toAlternatives(self, bits):
+		return [(wbf, (wbits-{"$"})|(bits if "$" in wbits else wbits)) for wbf, wbits in self.alternatives]
 	def baseform(self, *tbits):
 		tbits = set(tbits)
 		for baseform, bits in self.alternatives:
@@ -45,11 +47,12 @@ class Token:
 		return bits
 
 class PatternRef:
-	def __init__(self, name, bits):
+	def __init__(self, name, bits, unexpanded=None):
 		self.name = name
 		self.bits = bits
+		self.unexpanded = unexpanded
 	def __repr__(self):
-		return "PatternRef(" + repr(self.name) + ", " + repr(self.bits) + ")"
+		return "PatternRef(" + repr(self.name) + ", " + repr(self.bits) +  ((", unexpanded=" + repr(self.unexpanded)) if self.unexpanded else "") + ")"
 	def toCode(self):
 		return "." + self.name + ("{" + ",".join(self.bits) + "}" if self.bits else "")
 
@@ -76,11 +79,11 @@ class StringOutput:
 			if var not in ans:
 				ans = ans.replace("$*", ",".join(args[i:]))
 				break
-			ans = ans.replace(var, a)
+			ans = ans.replace(var, str(a))
 		return ans
 
 class Grammar:
-	def __init__(self, patterns=None, names=None):
+	def __init__(self, patterns=None, names=None, checks=None):
 		self.patterns = patterns or {}
 		self.names = names or {}
 	def print(self):
@@ -127,32 +130,57 @@ class Grammar:
 		if len(tokens) > 2 and tokens[1] == "::=" and (outputs or "->" in tokens):
 			end = tokens.index("->") if "->" in tokens else len(tokens)
 			category = tokens[0][1:]
+			bits = set()
+			if "{" in category and category[-1] == "}":
+				bits = set(",".split(category[category.index("{")+1:-1]))
+				category = category[category.index("{")]
 			words = []
 			for token in tokens[2:end]:
-				if "{" in token and token[-1] == "}":
-					bits = set(token[token.index("{")+1:-1].split(","))
-					token = token[:token.index("{")]
-				else:
-					bits = set()
-				if token == "":
+				word = parseWord(token)
+				if not word:
 					continue
-				elif token == ".":
-					words.append(Token(".", []))
-				elif token[0] == ".":
-					words.append(PatternRef(token[1:], bits))
-				elif bits:
-					words.append(Token("", [(token, bits)]))
-				else:
-					words.append(Token(token, []))
+					
+				words.append(word)
 			if category not in self.patterns:
 				self.patterns[category] = []
 			if "->" in tokens:
-				outputs = outputs + (StringOutput(" ".join(tokens[end+1:])),)
-			pattern = Pattern(category, words, MultiOutput(outputs) if len(outputs) > 1 else outputs[0])
+				outputs = outputs + tuple(StringOutput(o) for o in " ".join(tokens[end+1:]).split(" &&& "))
+			pattern = Pattern(category, words, MultiOutput(outputs) if len(outputs) > 1 else outputs[0], bits=bits)
 			self.patterns[category].append(pattern)
 			return pattern
 		else:
 			raise Exception("Syntax error on line `" + line + "'")
+	def expandBits(self, category, bits, expanded=None):
+		if category not in self.patterns:
+			return {}
+		
+		ans = expanded or {}
+		name = "." + category + "{" + ",".join(bits) + "}"
+		if name in ans:
+			return ans
+		
+		ans[name] = []
+		for pattern in self.patterns[category]:
+			ans[name].append(pattern.expandBits(name, self, ans, bits))
+		
+		return ans
+
+def parseWord(token):
+	if "{" in token and token[-1] == "}":
+		bits = set(token[token.index("{")+1:-1].split(","))
+		token = token[:token.index("{")]
+	else:
+		bits = set()
+	if token == "":
+		return None
+	elif token == ".":
+		return Token(".", [])
+	elif token[0] == ".":
+		return PatternRef(token[1:], bits)
+	elif bits:
+		return Token("", [(token, bits)])
+	else:
+		return Token(token, [])
 
 debug_level = 0
 indent = 0
@@ -239,12 +267,15 @@ def makeErrorMessage(ref, tokens, start, length):
 	return line1 + "\n" + line2 + "\n" + line3
 
 class Pattern:
-	def __init__(self, name, words, output):
+	def __init__(self, name, words, output, bits=set()):
 		self.name = name
 		self.words = words
 		self.output = output
+		self.bits = set(bits)
+		self.positive_bits = set(bit for bit in bits if not bit.startswith("!"))
+		self.negative_bits = set(bit[1:] for bit in bits if bit.startswith("!"))
 	def __repr__(self):
-		return "Pattern(" + repr(self.name) + ", " + repr(self.words) + ", " + repr(self.output) + ")"
+		return "Pattern(" + repr(self.name) + ", " + repr(self.words) + ", " + repr(self.output) + ", bits=" + repr(self.bits) + ")"
 	def toCode(self):
 		return " ".join([w.toCode() for w in self.words])# + " -> " + repr(self.output)
 	def allowsEmptyContent(self):
@@ -263,7 +294,7 @@ class Pattern:
 				groups[word][1].append(token)
 				i += 1
 			else:
-				if token.token.lower() == word.token.lower() or token.containsMatch([(wbf, bits if "$" in wbits else wbits) for wbf, wbits in word.alternatives]):
+				if token.token.lower() == word.token.lower() or token.containsMatch(word.toAlternatives(bits)):
 					if debug_level >= 3:
 						print(" "*indent+"match:", token, word, bits)
 					i += 1
@@ -283,7 +314,7 @@ class Pattern:
 				return ans
 		
 		if debug_level >= 2:
-			print(" "*indent, end="")
+			print(" "*indent, self.name, (i, j), end=" ")
 			for w in self.words:
 				print(w.name+"=["+" ".join([str(w2) for w2 in groups[w][1]])+"]" if isinstance(w, PatternRef) else str(w), end=" ")
 			print()
@@ -318,3 +349,25 @@ class Pattern:
 			print("->", ans)
 		
 		return ans
+	def expandBits(self, name, grammar, expanded, bits):
+		positive_bits = set(bit for bit in bits if not bit.startswith("!"))
+		negative_bits = set(bit[1:] for bit in bits if bit.startswith("!"))
+		if not self.positive_bits <= positive_bits or self.negative_bits & positive_bits or self.positive_bits & negative_bits:
+			return Pattern(name, [Token("<FALSE>", [])], self.output)
+		
+		ans = []
+		for word in self.words:
+			if isinstance(word, PatternRef):
+				new_bits = (word.bits-{"$"})|(bits if "$" in word.bits else set())
+				new_name = "." + word.name + "{" + ",".join(new_bits) + "}"
+				grammar.expandBits(word.name, new_bits, expanded)
+				ans += [PatternRef(new_name, set(), unexpanded=word)]
+			
+			elif isinstance(word, Token):
+				new_alternatives = [(wbf, (wbits-{"$"})|(bits if "$" in wbits else set())) for wbf, wbits in word.alternatives]
+				ans += [Token(word.token, new_alternatives)]
+			
+			else:
+				assert False
+		
+		return Pattern(name, ans, self.output)
