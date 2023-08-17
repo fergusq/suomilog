@@ -76,6 +76,7 @@ class StringOutput(Output):
 	def __repr__(self):
 		return "StringOutput(" + repr(self.string) + ")"
 	def eval(self, args):
+		args = [arg.token if isinstance(arg, Token) else str(arg) for arg in args]
 		ans = self.string
 		for i, a in enumerate(args):
 			var = "$"+str(i+1)
@@ -126,7 +127,7 @@ class Grammar:
 		if ref.bits:
 			name += " (" + ",".join(ref.bits) + ")"
 		return name
-	def parseGrammarLine(self, line: str, *outputs: Output):
+	def parseGrammarLine(self, line: str, *outputs: Output, default_output=StringOutput):
 		if debug_level >= 1:
 			print(line)
 		tokens = line.replace("\t", " ").split(" ")
@@ -147,7 +148,7 @@ class Grammar:
 			if category not in self.patterns:
 				self.patterns[category] = []
 			if "->" in tokens:
-				outputs = outputs + tuple(StringOutput(o) for o in " ".join(tokens[end+1:]).split(" &&& "))
+				outputs = outputs + tuple(default_output(o) for o in " ".join(tokens[end+1:]).split(" &&& "))
 			pattern = Pattern(category, words, MultiOutput(list(outputs)) if len(outputs) > 1 else outputs[0], bits=bits)
 			self.patterns[category].append(pattern)
 			return pattern

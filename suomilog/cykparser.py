@@ -1,8 +1,10 @@
 from collections import defaultdict
-from typing import List
+from typing import DefaultDict, List, Set, Tuple
 
 from . import patternparser as pp
 
+CYKTable = DefaultDict[Tuple[int, int], Set[str]]
+SplitTable = DefaultDict[Tuple[int, int, str], Set[int]]
 
 class CYKParser:
 	def __init__(self, grammar: pp.Grammar, root_category: str):
@@ -67,9 +69,9 @@ class CYKParser:
 						self.one_rules_expanded[a].add(rule)
 						queue.append(rule)
 	
-	def parse(self, tokens: List[pp.Token]):
-		cyk_table = defaultdict(set)
-		split_table = defaultdict(set)
+	def parse(self, tokens: List[pp.Token]) -> "CYKAnalysis":
+		cyk_table: CYKTable = defaultdict(set)
+		split_table: SplitTable = defaultdict(set)
 		for i in range(len(tokens)):
 			for rule_name, token_rule in self.token_rules.items():
 				if isinstance(token_rule, pp.Token):
@@ -89,34 +91,7 @@ class CYKParser:
 								cyk_table[(start, end)] |= {rule_name} | self.one_rules_expanded[rule_name]
 								split_table[(start, end, rule_name)] |= {split}
 		
-		return cyk_table, split_table
-	
-	def getOutput(self, tokens, cyk_table, split_table, start, end, rule_name):
-		ans = set()
-		for rule in cyk_table[(start, end)]:
-			if (rule_name, rule) in self.outputs:
-				output = self.outputs[(rule_name, rule)]
-				args = self.getOutput(tokens, cyk_table, split_table, start, end, rule)
-				assert len(args) > 0
-				for arg in args:
-					ans.add(output.eval([arg]))
-
-		for split in split_table[(start, end, rule_name)]:
-			for rule1 in cyk_table[(start, split)]:
-				for rule2 in cyk_table[(split, end)]:
-					if (rule_name, (rule1, rule2)) in self.outputs:
-						output = self.outputs[(rule_name, (rule1, rule2))]
-						args1 = self.getOutput(tokens, cyk_table, split_table, start, split, rule1)
-						args2 = self.getOutput(tokens, cyk_table, split_table, split, end, rule2)
-						assert len(args1) > 0 and len(args2) > 0
-						for arg1 in args1:
-							for arg2 in args2:
-								ans.add(output.eval([arg1, arg2]))
-		
-		if not ans:
-			return [tokens[start].token]
-		
-		return ans
+		return CYKAnalysis(self, tokens, cyk_table, split_table)
 	
 	def print(self):
 		for a, b in self.token_rules.items():
@@ -135,6 +110,45 @@ class CYKParser:
 		
 		for a, b in self.outputs.items():
 			print(repr(a), repr(b))
+
+class CYKAnalysis:
+	def __init__(self, cyk_parser: CYKParser, tokens: List[pp.Token], cyk_table: CYKTable, split_table: SplitTable):
+		self.cyk_parser = cyk_parser
+		self.tokens = tokens
+		self.cyk_table = cyk_table
+		self.split_table = split_table
+	
+	def getOutput(self, rule_name: str, start: int = 0, end: int = 0):
+		if end <= 0:
+			end = len(self.tokens) - end
+		if rule_name not in self.cyk_table[(start, end)]:
+			return None
+		
+		ans = set()
+		for rule in self.cyk_table[(start, end)]:
+			if (rule_name, rule) in self.cyk_parser.outputs:
+				output = self.cyk_parser.outputs[(rule_name, rule)]
+				args = self.getOutput(rule, start, end)
+				assert args and len(args) > 0
+				for arg in args:
+					ans.add(output.eval([arg]))
+
+		for split in self.split_table[(start, end, rule_name)]:
+			for rule1 in self.cyk_table[(start, split)]:
+				for rule2 in self.cyk_table[(split, end)]:
+					if (rule_name, (rule1, rule2)) in self.cyk_parser.outputs:
+						output = self.cyk_parser.outputs[(rule_name, (rule1, rule2))]
+						args1 = self.getOutput(rule1, start, split)
+						args2 = self.getOutput(rule2, split, end)
+						assert args1 and args2 and len(args1) > 0 and len(args2) > 0
+						for arg1 in args1:
+							for arg2 in args2:
+								ans.add(output.eval([arg1, arg2]))
+		
+		if not ans:
+			return [self.tokens[i] for i in range(start, end)]
+		
+		return ans
 
 class DenormalizeStartOutput(pp.Output):
 	def __init__(self, a_is_pattern: bool, b_is_pattern: bool):
