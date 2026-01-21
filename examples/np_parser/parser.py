@@ -1,5 +1,5 @@
 # Suomilog
-# Copyright (C) 2018 Iikka Hauhio
+# Copyright (C) 2026 Iikka Hauhio
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -119,7 +119,7 @@ class WordPattern(pp.BasePattern[OutputT]):
 
 def main():
 	argparser = argparse.ArgumentParser()
-	argparser.add_argument("-d", "--debug")
+	argparser.add_argument("-d", "--debug", action="store_true")
 	argparser.add_argument("plural_tag", choices=["+sg", "+pl"])
 	argparser.add_argument("case_tag", choices=fiutils.SINGULAR_AND_PLURAL_CASES+fiutils.PLURAL_CASES)
 	args = argparser.parse_args()
@@ -136,7 +136,7 @@ def main():
 	path = os.path.dirname(os.path.realpath(__file__))
 	with open(os.path.join(path, "np.suomilog")) as file:
 		for line in file:
-			if "::=" in line:
+			if "::=" in line and not line.startswith("#"):
 				grammar.parseGrammarLine(line.replace("\n", ""), default_output=ReinflectorOutput)
 
 	parser = cyk.CYKParser(grammar, "ROOT")
@@ -145,7 +145,7 @@ def main():
 		n_patterns = sum([len(category) for category in grammar.patterns.values()])
 		print("Ladattu", n_patterns, "fraasia.")
 		grammar.print()
-		parser.print()
+		#parser.print()
 
 	while True:
 		try:
@@ -170,6 +170,10 @@ def main():
 					print("Jäsennys epäonnistui.")
 					print(analysis.cyk_table)
 					print(analysis.split_table)
+				
+				else:
+					print()  # Tulostetaan tyhjä rivi jos epäonnistuttiin
+
 				continue
 			
 			for output in outputs:
@@ -179,7 +183,7 @@ def main():
 						token = list(fiutils.inflect_nominal(token, args.case_tag, args.plural_tag))[0]
 					
 					inflected.append(token)
-				
+
 				if args.debug:
 					print(args.plural_tag + args.case_tag + " ->", " ".join(inflected))
 
