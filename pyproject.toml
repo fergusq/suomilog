@@ -1,0 +1,13 @@
+[project]
+name = "suomilog"
+version = "1.0"
+description = "Collection of utilities for parsing natural languages using context-free grammars"
+readme = "README.rst"
+requires-python = ">=3.14"
+license = "GPL"
+author = "Iikka Hauhio"
+author_email = "iikka.hauhio@gmail.com"
+dependencies = [
+    "kfst-rs>=1.0.0",
+    "pypykko>=0.3.0",
+]

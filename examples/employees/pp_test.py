@@ -19,7 +19,7 @@ import readline, os
 from suomilog.patternparser import *
 from suomilog.finnish import tokenize
 
-grammar = Grammar()
+grammar: Grammar[str] = Grammar()
 
 query = Pattern("QUERY", [
 	Token("hae", []),
@@ -28,7 +28,7 @@ query = Pattern("QUERY", [
 ], StringOutput("search($1)"))
 
 path = os.path.dirname(os.path.realpath(__file__))
-with open(os.path.join(path, "employees.txt")) as file:
+with open(os.path.join(path, "employees.suomilog")) as file:
 	for line in file:
 		if "::=" in line:
 			grammar.parseGrammarLine(line.replace("\n", ""))
@@ -56,11 +56,11 @@ while True:
 			for cat in grammar.patterns:
 				print(cat)
 	else:
-		del ERRORS[:]
+		del ERROR_STACK[:]
 		tokens = tokenize(line)
 		alternatives = query.match(grammar, tokens, set())
 		for alt in alternatives:
 			print(alt)
 		if len(alternatives) == 0:
-			for error in ERRORS:
-				print(error+"\n")
+			for error in ERROR_STACK:
+				print(str(error)+"\n")

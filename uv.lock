@@ -1,0 +1,65 @@
+version = 1
+revision = 3
+requires-python = ">=3.14"
+
+[[package]]
+name = "immutables"
+version = "0.21"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/69/41/0ccaa6ef9943c0609ec5aa663a3b3e681c1712c1007147b84590cec706a0/immutables-0.21.tar.gz", hash = "sha256:b55ffaf0449790242feb4c56ab799ea7af92801a0a43f9e2f4f8af2ab24dfc4a", size = 89008, upload-time = "2024-10-10T00:55:01.434Z" }
+
+[[package]]
+name = "kfst"
+version = "4.3.3"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "immutables" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/24/02/019179a0f758cb36beddacb44e350017975485e69c4f3d5ac54a5548af56/kfst-4.3.3.tar.gz", hash = "sha256:a4af67d1604726f07f5d1fd5a17d3aae4e3d07f29055472a35bd32ff271ae75e", size = 14153, upload-time = "2025-10-06T13:20:41.321Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/10/1f/5819392c356407386fbf9b0e981c4dfd0c171fd976c507a01ca06c6278e1/kfst-4.3.3-py3-none-any.whl", hash = "sha256:3f8df5d768bdae67390cc2b9a2aa67163d9e3d1740b39bc9646de70b74b1da2d", size = 20093, upload-time = "2025-10-06T13:20:39.762Z" },
+]
+
+[[package]]
+name = "kfst-rs"
+version = "1.0.0"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/f7/c4/60649dc60f3c758d5781f7f67e229987a2387f2d9f76470cfacd5dfd4c66/kfst_rs-1.0.0-cp311-abi3-macosx_10_12_x86_64.whl", hash = "sha256:bd3d3c78407a7c791d759bb54988a05247d69b5e2decd404abeb941c25d5c90f", size = 982003, upload-time = "2025-10-06T13:33:07.054Z" },
+    { url = "https://files.pythonhosted.org/packages/36/11/22ed3ba9907b8839205958a5ad4e483bbff4ac5c1b60d2f9a172cded5af6/kfst_rs-1.0.0-cp311-abi3-macosx_11_0_arm64.whl", hash = "sha256:190bd3ac73dd7de9bbe7154eadd9605e53646c9f8127d62ed88ade66c5e045d6", size = 967377, upload-time = "2025-10-06T13:33:10.772Z" },
+    { url = "https://files.pythonhosted.org/packages/6d/82/61da708c0ac9bf1e5b03df51906e318a30bae463f9f33904a347417270e2/kfst_rs-1.0.0-cp311-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:7de792ac66def44703467b87c5d3f8c48630608a2708367d10565d24cd8d77ee", size = 491838, upload-time = "2025-10-06T13:33:13.003Z" },
+    { url = "https://files.pythonhosted.org/packages/5f/8e/52a82df6a9a9612b734ebfe549b83045e1b670e8a77eeef3b853dbda0063/kfst_rs-1.0.0-cp311-abi3-manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:7b040cd54141ebee878cbb1ea93824e9d04324464760af26f1302981f91e2d5e", size = 569446, upload-time = "2025-10-06T13:33:15.443Z" },
+    { url = "https://files.pythonhosted.org/packages/23/e3/00e368985c2069c1f8f15badec84e1814be50d3caa4592c14e308345039d/kfst_rs-1.0.0-cp311-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:10cb2d6d2306d9590b8d82d6d44da86ccec3915c7877f6e08ed88e8573f5af5c", size = 521075, upload-time = "2025-10-06T13:33:17.323Z" },
+    { url = "https://files.pythonhosted.org/packages/3b/3f/4658e14b6cdc328337efd97306b5490d0ae585e3424a43581b35d1f925d4/kfst_rs-1.0.0-cp311-abi3-musllinux_1_2_aarch64.whl", hash = "sha256:134c1db78a7ba9cd2d74019e761c7328281e535cc70502557b34e45d20f8a862", size = 489149, upload-time = "2025-10-06T13:33:18.819Z" },
+    { url = "https://files.pythonhosted.org/packages/a7/b7/775bd882910409838704850907c5c0e7aba0b1dca8854fd8d2793e26e7e2/kfst_rs-1.0.0-cp311-abi3-musllinux_1_2_i686.whl", hash = "sha256:dbc493c06c1b8cf358e5810636ad6a09931d59b01108efdfabce2647a96d8c61", size = 549687, upload-time = "2025-10-06T13:33:20.737Z" },
+    { url = "https://files.pythonhosted.org/packages/a2/be/17bca7bb6f47de2cf098586954b252ff50fd894a9dacccfe5a6f9584bfd9/kfst_rs-1.0.0-cp311-abi3-musllinux_1_2_x86_64.whl", hash = "sha256:c82815f7b3c99c41c1fc623fffe93e18377df793c54a4b24ed00d90bdabe48a1", size = 519870, upload-time = "2025-10-06T13:33:23.058Z" },
+    { url = "https://files.pythonhosted.org/packages/c7/ab/2084f0a0d742fd640174b4a915b556481065d840ad9a4385724b7440ac68/kfst_rs-1.0.0-cp311-abi3-win_amd64.whl", hash = "sha256:33059e4a92966c07220302ba015c8023b55b9f46195310af2c53a537f97cce9c", size = 850398, upload-time = "2025-10-06T13:33:25.529Z" },
+    { url = "https://files.pythonhosted.org/packages/d0/17/d828b3ad4180e5549334df384cf53a4cbe55ec2359dd7364d85e55d0955b/kfst_rs-1.0.0-cp311-abi3-win_arm64.whl", hash = "sha256:23080cde4a6f9443bd5dca86101e75b8aaf43d1d1433e6d61e8a2d1fc3995fd7", size = 761783, upload-time = "2025-10-06T13:33:29.369Z" },
+]
+
+[[package]]
+name = "pypykko"
+version = "0.3.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "kfst" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/f0/84/936aafc7b59575140c76b41bc61ba07f0919463b3d991f91292dd26d0f81/pypykko-0.3.0.tar.gz", hash = "sha256:b7216a1226a050f11988fe71b835f981961d5b66cec68e45e2609e2e81cebce5", size = 7994081, upload-time = "2025-10-07T10:20:13.897Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/0b/96/534d4e0464a0866e5f8ef0321cb1f712e4efbc0b4bc72cf94c02c9b78764/pypykko-0.3.0-py3-none-any.whl", hash = "sha256:d8e53445287f38d072ca857c43fac324c08892c32c32ad1d5a12ab5f54a33de4", size = 8000219, upload-time = "2025-10-07T10:20:07.477Z" },
+]
+
+[[package]]
+name = "suomilog"
+version = "1.0"
+source = { virtual = "." }
+dependencies = [
+    { name = "kfst-rs" },
+    { name = "pypykko" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "kfst-rs", specifier = ">=1.0.0" },
+    { name = "pypykko", specifier = ">=0.3.0" },
+]

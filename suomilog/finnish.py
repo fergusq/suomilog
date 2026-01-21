@@ -16,271 +16,105 @@
 
 import re
 from collections import defaultdict
-from voikko import libvoikko as lv
-from voikko.inflect_word import inflect_word
+from typing import Literal
+import pypykko.utils as pykko
+from pypykko.reinflect import reinflect as pykko_reinflect
+from pypykko.tokenizer import text2tokens as pykko_tokenize
 from . import patternparser as pp
 
-DICTIONARY = defaultdict(list)
+DICTIONARY: defaultdict[str, list[pp.Token]] = defaultdict(list)
 
-voikko = lv.Voikko("fi-x-morpho")
-
-def tokenize(text):
-	tokens = []
-	for token in voikko.tokens(text):
-		if token.tokenType == lv.Token.WHITESPACE:
+def tokenize(text: str) -> list[pp.Token]:
+	tokens: list[pp.Token] = []
+	for token in pykko_tokenize(text):
+		if token.strip() == "":
 			continue
-		if "-" in token.tokenText:
-			index = token.tokenText.rindex("-")+1
-			lastPart = token.tokenText[index:]
-			baseformPrefix = token.tokenText[:index].lower()
-		else:
-			lastPart = token.tokenText
-			baseformPrefix = ""
+
 		alternatives = []
-		for word in voikko.analyze(token.tokenText):
-			if "BASEFORM" in word:
-				alternatives.append(baseformAndBits(word))
-		# Jos jäsennys epäonnistui, koetetaan jäsennystä vain viimeisen palan kautta
-		if len(alternatives) == 0 and baseformPrefix:
-			for word in voikko.analyze(lastPart):
-				if "BASEFORM" in word:
-					alternatives.append(baseformAndBits(word, baseformPrefix))
+		for word in pykko.analyze(token):
+			alternatives.append(baseformAndBits(word))
+
 		# Jos sana löytyy suomilogin omasta sanakirjasta, lisää myös sieltä vaihtoehdot
-		if token.tokenText.lower() in DICTIONARY:
-			alternatives += DICTIONARY[token.tokenText.lower()]
-		tokens.append(pp.Token(token.tokenText, alternatives))
+		if token.lower() in DICTIONARY:
+			alternatives += DICTIONARY[token.lower()]
+
+		tokens.append(pp.Token(token, alternatives))
+
 	return tokens
 
-def baseformAndBits(word, baseformPrefix=None):
-	bits = set()
-	addBits(word, bits, "NUMBER", {"singular": "yksikkö", "plural": "monikko"})
-	addBits(word, bits, "SIJAMUOTO")
-	addBits(word, bits, "CLASS")
-	addBits(word, bits, "PARTICIPLE")
-	addBits(word, bits, "PERSON")
-	addBits(word, bits, "MOOD", {
-		"MINEN-infinitive": "-minen",
-		"MA-infinitive": "-ma",
-		"E-infinitive": "-e",
-		"A-infinitive": "-a",
-		"imperative": "imperatiivi",
-		"indicative": "indikatiivi",
-		"conditional": "konditionaali",
-		"potential": "potentiaali"
-	})
-	if word["CLASS"] == "lukusana" and ("SIJAMUOTO" not in word or not word["SIJAMUOTO"]):
-		bits.add("nimento")
-	if not baseformPrefix:
-		return word["BASEFORM"].lower(), bits
-	else:
-		return baseformPrefix + word["BASEFORM"].lower(), bits
+def baseformAndBits(word: pykko.PykkoAnalysis) -> tuple[str, set[str]]:
+	bits: set[str] = set()
 
-def addBits(word, bits, name, table=None):
-	if name in word:
-		if table:
-			if word[name] in table:
-				bits.add(table[word[name]])
-		else:
-			bits.add(word[name])
+	# Lisää kaikki morphtagit bitteinä
+	morphtags: list[str] = re.split(r"(?=\+)", word.morphtags)
+	bits |= set(morphtags)
 
-def addNounToDictionary(noun):
-	for plural in [False, True]:
-		for case in CASES:
-			DICTIONARY[inflect(noun, case, plural).lower()].append((noun, {case, "monikko" if plural else "yksikkö"}))
+	# TODO: Pitäisikö lisätä muitakin yhdistelmiä kuin tämä?
+	if "+sg" in bits and "+nom" in bits:
+		bits.add("+sg+nom")
 
-CASES = [
-	"nimento",
-	"omanto",
-	"osanto",
-	"olento",
-	"tulento",
-	"ulkoolento",
-	"ulkotulento",
-	"ulkoeronto",
-	"sisaolento",
-	"sisatulento",
-	"sisaeronto",
-	"vajanto"
+	# Lisää sanaluokka, lemma ja pintamuoto bitteinä
+	bits.add(f"{word.lemma}:{word.pos}")
+	bits.add(f"{word.lemma}:")
+	bits.add(f":{word.pos}")
+	bits.add(f"«{word.wordform}»")
+
+	return word.lemma, bits
+
+SINGULAR_AND_PLURAL_CASES = [
+	"+nom",
+	"+gen",
+	"+par",
+	"+ess",
+	"+abe",
+	"+tra",
+	"+ade",
+	"+abl",
+	"+all",
+	"+ine",
+	"+ela",
+	"+ill",
 ]
 
-CASES_LATIN = {
-	"nimento": "nominatiivi",
-	"omanto": "genetiivi",
-	"osanto": "partitiivi",
-	"olento": "essiivi",
-	"tulento": "translatiivi",
-	"ulkotulento": "allatiivi",
-	"ulkoolento": "adessiivi",
-	"ulkoeronto": "ablatiivi",
-	"sisatulento": "illatiivi",
-	"sisaolento": "inessiivi",
-	"sisaeronto": "elatiivi",
-	"vajanto": "abessiivi",
-	"keinonto": "instruktiivi",
-	"seuranto": "komitatiivi",
-	"kerrontosti": "adverbi"
-}
+PLURAL_CASES = [
+	"+ins",
+	"+com",
+]
 
-CASES_ENGLISH = {
-	"nimento": "nominative",
-	"omanto": "genitive",
-	"osanto": "partitive",
-	"olento": "essive",
-	"tulento": "translative",
-	"ulkotulento": "allative",
-	"ulkoolento": "adessive",
-	"ulkoeronto": "ablative",
-	"sisatulento": "illative",
-	"sisaolento": "inessive",
-	"sisaeronto": "elative",
-	"vajanto": "abessive",
-	"keinonto": "instructive",
-	"seuranto": "comitative",
-	"kerrontosti": "adverb"
-}
-
-CASES_A = {
-	"nimento": "",
-	"omanto": ":n",
-	"osanto": ":ta",
-	"olento": ":na",
-	"tulento": ":ksi",
-	"ulkotulento": ":lle",
-	"ulkoolento": ":lla",
-	"ulkoeronto": ":lta",
-	"sisatulento": ":han",
-	"sisaolento": ":ssa",
-	"sisaeronto": ":sta",
-	"vajanto": ":tta",
-	"keinonto": ":in",
-	"seuranto": ":ineen",
-	"kerrontosti": ":sti"
-}
-
-CASES_F = {
-	"nimento": "",
-	"omanto": ":n",
-	"osanto": ":ää",
-	"olento": ":nä",
-	"tulento": ":ksi",
-	"ulkotulento": ":lle",
-	"ulkoolento": ":llä",
-	"ulkoeronto": ":ltä",
-	"sisatulento": ":ään",
-	"sisaolento": ":ssä",
-	"sisaeronto": ":stä",
-	"vajanto": ":ttä",
-	"keinonto": ":in",
-	"seuranto": ":ineen",
-	"kerrontosti": ":sti"
-}
-
-CASES_ELLIPSI = {
-	"nimento": "",
-	"omanto": ":n",
-	"osanto": ":ä",
-	"olento": ":nä",
-	"tulento": ":ksi",
-	"ulkotulento": ":lle",
-	"ulkoolento": ":llä",
-	"ulkoeronto": ":ltä",
-	"sisatulento": ":iin",
-	"sisaolento": ":ssä",
-	"sisaeronto": ":stä",
-	"vajanto": ":ttä",
-	"keinonto": ":ein",
-	"seuranto": ":eineen",
-	"kerrontosti": ":sti"
-}
-
-CASE_REGEXES = {
-	"singular": {
-		"omanto": r"[^:]+:n",
-		"osanto": r"[^:]+:(aa?|ää?|t[aä])",
-		"olento": r"[^:]+:(n[aä])",
-		"tulento": r"[^:]+:ksi",
-		"ulkotulento": r"[^:]+:lle",
-		"ulkoolento": r"[^:]+:ll[aä]",
-		"ulkoeronto": r"[^:]+:lt[aä]",
-		"sisatulento": r"[^:]+:(aan|ään|h[aeiouyäöå]n)",
-		"sisaolento": r"[^:]+:ss[aä]",
-		"sisaeronto": r"[^:]+:st[aä]",
-		"vajanto": r"[^:]+:tt[aä]"
-	},
-	"plural": {
-		"omanto": r"[^:]+:ien",
-		"osanto": r"[^:]+:(ia?|iä?|it[aä])",
-		"olento": r"[^:]+:(in[aä])",
-		"tulento": r"[^:]+:iksi",
-		"ulkotulento": r"[^:]+:ille",
-		"ulkoolento": r"[^:]+:ill[aä]",
-		"ulkoeronto": r"[^:]+:ilt[aä]",
-		"sisatulento": r"[^:]+:(iin|ih[aeiouyäöå]n)",
-		"sisaolento": r"[^:]+:iss[aä]",
-		"sisaeronto": r"[^:]+:ist[aä]",
-		"vajanto": r"[^:]+:itt[aä]",
-		"keinonto": r"[^:]+:in",
-		"seuranto": r"[^:]+:ine[^:]*"
-	},
-	"": {
-		"kerrontosti": "[^:]+:sti"
-	}
-}
-
-ORDINAL_CASE_REGEXES = {
-	"nimento": r"[^:]+:s",
-	"omanto": r"[^:]+:nnen",
-	"osanto": r"[^:]+:tt[aä]",
-	"tulento": r"[^:]+:nneksi",
-	"ulkotulento": r"[^:]+:nnelle",
-	"ulkoolento": r"[^:]+:nnell[aä]",
-	"ulkoeronto": r"[^:]+:nnelt[aä]",
-	"sisatulento": r"[^:]+:nteen",
-	"sisaolento": r"[^:]+:nness[aä]",
-	"sisaeronto": r"[^:]+:nnest[aä]",
-	"vajanto": r"[^:]+:nnett[aä]",
-	"kerrontosti": r"[^:]+:nnesti"
-}
-
-def inflect(word, case, plural):
-	case_latin = CASES_LATIN[case]
-	if plural:
-		case_latin += "_mon"
+def inflect_nominal(word: str, case_tag: str, plural_tag: str):
+	assert plural_tag in ["+sg", "+pl"]
+	if plural_tag == "+pl":
+		assert case_tag in SINGULAR_AND_PLURAL_CASES or case_tag in PLURAL_CASES
 	
-	if re.fullmatch(r"[0-9]+", word):
-		if case == "sisatulento":
-			if word[-1] in "123560":
-				return word + ":een"
-			elif word[-1] in "479":
-				return word + ":ään"
-			else: # 8
-				return word + ":aan"
-		elif word[-1] in "14579":
-			return word + CASES_A[case].replace("a", "ä")
-		else:
-			return word + CASES_A[case]
-	elif len(word) == 1:
-		if word in "flmnrsx":
-			return word + CASES_F[case]
-		elif case == "sisatulento":
-			if word in "aeiouyäöå":
-				return word + ":h" + word + "n"
-			elif word in "bcdgptvw":
-				return word + ":hen"
-			elif word in "hk":
-				return word + ":hon"
-			elif word == "j":
-				return "j:hin"
-			elif word == "q":
-				return "q:hun"
-			elif word == "z":
-				return "z:aan"
-		elif word in "ahkoquzå":
-			return word + CASES_A[case]
-		else:
-			return word + CASES_A[case].replace("a", "ä")
 	else:
-		inflections = inflect_word(word)
-		if case_latin not in inflections:
-			return word + ":" + case
-		return inflections[case_latin]
+		assert case_tag in SINGULAR_AND_PLURAL_CASES
+	
+
+
+	new_morphtags = []
+	for analysis in pykko.analyze(word):
+		morphtags: list[str] = re.split(r"(?=\+)", analysis.morphtags)
+		new_morphtags = []
+		is_nominal = False
+		for tag in morphtags:
+			if tag == "+conneg":
+				is_nominal = False
+				break
+
+			if tag == "+sg" or tag == "+pl":
+				new_morphtags.append(plural_tag)
+				is_nominal = True
+			
+			elif tag in SINGULAR_AND_PLURAL_CASES or tag in PLURAL_CASES:
+				new_morphtags.append(case_tag)
+			
+			else:
+				new_morphtags.append(tag)
+		
+		if is_nominal:
+			break
+	
+	else:
+		new_morphtags = [plural_tag, case_tag]
+
+	return pykko_reinflect(word, "".join(new_morphtags))

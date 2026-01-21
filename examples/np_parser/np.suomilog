@@ -1,0 +1,95 @@
+.ROOT ::= .NP{+sg,+nom} -> $1
+.ROOT ::= .NP{+sg,+gen} -> $1
+.ROOT ::= .NP{+pl,+nom} -> $1
+.ROOT ::= .NP{+pl,+gen} -> $1
+.ROOT ::= .NP-CASE -> $1
+
+.NP-CASE ::= .NP{+sg,+par} -> $1
+.NP-CASE ::= .NP{+sg,+ess} -> $1
+.NP-CASE ::= .NP{+sg,+abe} -> $1
+.NP-CASE ::= .NP{+sg,+tra} -> $1
+.NP-CASE ::= .NP{+sg,+ade} -> $1
+.NP-CASE ::= .NP{+sg,+abl} -> $1
+.NP-CASE ::= .NP{+sg,+all} -> $1
+.NP-CASE ::= .NP{+sg,+ine} -> $1
+.NP-CASE ::= .NP{+sg,+ela} -> $1
+.NP-CASE ::= .NP{+sg,+ill} -> $1
+
+.NP-CASE ::= .NP{+pl,+par} -> $1
+.NP-CASE ::= .NP{+pl,+ess} -> $1
+.NP-CASE ::= .NP{+pl,+abe} -> $1
+.NP-CASE ::= .NP{+pl,+tra} -> $1
+.NP-CASE ::= .NP{+pl,+ade} -> $1
+.NP-CASE ::= .NP{+pl,+abl} -> $1
+.NP-CASE ::= .NP{+pl,+all} -> $1
+.NP-CASE ::= .NP{+pl,+ine} -> $1
+.NP-CASE ::= .NP{+pl,+ela} -> $1
+.NP-CASE ::= .NP{+pl,+ill} -> $1
+.NP-CASE ::= .NP{+pl,+ins} -> $1
+.NP-CASE ::= .NP{+pl,+com} -> $1
+
+
+.NP ::= .NP2{$} , .NP2{$} .CONJ .NP2{$} -> $1 , ($2) $3
+.NP ::= .NP2{$} .CONJ .NP2{$} -> $1 ($2) $3
+.NP ::= .NP2{$} -> $1
+
+.NP2 ::= .NP-NUM{$} .NP-CASE -> $1 ($2)
+.NP2 ::= .NP-NUM{$} .VP-INF -> $1 ($2)
+.NP2 ::= .NP-NUM{$} -> $1
+
+.NP-NUM ::= .NUM{$,+sg,+nom,!yksi:numeral} .NP-ADJ/NOUN{+sg,+par} -> $1 [$2]
+.NP-NUM ::= .NUM{$,+sg,+nom,yksi:numeral} .NP-ADJ/NOUN{+sg,+nom} -> $1 $2
+.NP-NUM ::= .NUM{$,!+sg+nom} .NP-ADJ/NOUN{$} -> $1 [$2]
+.NP-NUM ::= .NP-ADJ/NOUN{$} -> $1
+
+.NP-ADJ/NOUN ::= .AP{$} .NP-ADJ/NOUN{$} -> $1 $2
+.NP-ADJ/NOUN ::= .GEN .NP-ADJ/NOUN{$} -> ($1) $2
+.NP-ADJ/NOUN ::= .NOUN{$} -> $1
+
+.AP ::= .ADJ{$} -> $1
+.AP ::= .ADVP .ADJ{$} -> ($1) $2
+.AP ::= .ADJ{+sg,+gen} .ADJ{$} -> ($1) $2
+
+.AP ::= .GEN .VERB{$,+part_ma} -> ($1) $2
+.AP ::= .GEN .ADVP .VERB{$,+part_ma} -> ($1 $2) $3
+
+.AP ::= .VP-INF .COP-PART{$} -> ($1) $2
+.AP ::= .VP-PART{$} -> $1
+
+.GEN ::= .NP{+gen} -> $1
+.GEN ::= .PRONOUN{+gen} -> $1
+
+.ADVP ::= .ADV -> $1
+.ADVP ::= .NP-CASE -> $1
+
+.VP-INF ::= .VERB{$,+inf3} -> $1
+.VP-INF ::= .NP-CASE .VERB{$,+inf3} -> $1 $2
+.VP-INF ::= .NP-CASE .ADVP .VERB{$,+inf3} -> $1 $2 $3
+
+.COP-PART ::= ..{$,oleva:participle} -> $1
+.COP-PART ::= ..{$,ollut:participle} -> $1
+
+.VP-PART ::= .VERB-PART{$} -> $1
+.VP-PART ::= .NP-CASE .VERB-PART{$} -> ($1) $2
+.VP-PART ::= .NP-CASE .ADVP .VERB-PART{$} -> ($1 $2) $3
+
+.VERB-PART ::= .VERB{$,+part_pres} -> $1
+.VERB-PART ::= .VERB{$,+part_past} -> $1
+.VERB-PART ::= .VERB{$,+part_maton} -> $1
+.VERB-PART ::= .VERB{$,+part_ma,+poss1sg} -> $1
+.VERB-PART ::= .VERB{$,+part_ma,+poss2sg} -> $1
+.VERB-PART ::= .VERB{$,+part_ma,+poss3sg} -> $1
+.VERB-PART ::= .VERB{$,+part_ma,+poss1pl} -> $1
+.VERB-PART ::= .VERB{$,+part_ma,+poss2pl} -> $1
+.VERB-PART ::= .VERB{$,+part_ma,+poss3pl} -> $1
+
+.NOUN ::= ..{$,:noun} -> $1
+.NOUN ::= ..{$,:proper} -> $1
+.NOUN ::= ..{$,:verb,+inf4} -> $1
+.PRONOUN ::= ..{$,:pronoun} -> $1
+.ADJ ::= ..{$,:adjective} -> $1
+.ADJ ::= ..{$,:participle} -> $1
+.NUM ::= ..{$,:numeral} -> $1
+.CONJ ::= ..{:conjunction} -> $1
+.ADV ::= ..{:adverb} -> $1
+.VERB ::= ..{$,:verb} -> $1
