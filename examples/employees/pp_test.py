@@ -16,22 +16,22 @@
 
 import readline, os
 
-from suomilog.patternparser import *
+from suomilog import Grammar, ProductionRule, Token, Nonterminal, StringOutput
 from suomilog.finnish import tokenize
 
 grammar: Grammar[str] = Grammar()
 
-query = Pattern("QUERY", [
+query = ProductionRule("QUERY", [
 	Token("hae", []),
 	Token("jokainen", []),
-	PatternRef("PATTERN", {"nimento", "yksikkö"})
+	Nonterminal("PATTERN", {"nimento", "yksikkö"})
 ], StringOutput("search($1)"))
 
 path = os.path.dirname(os.path.realpath(__file__))
 with open(os.path.join(path, "employees.suomilog")) as file:
 	for line in file:
 		if "::=" in line:
-			grammar.parseGrammarLine(line.replace("\n", ""))
+			grammar.parse_grammar_line(line.replace("\n", ""))
 
 n_patterns = sum([len(category) for category in grammar.patterns.values()])
 print("Ladattu", n_patterns, "fraasia.")
@@ -50,7 +50,7 @@ while True:
 		if len(tokens) == 1 and tokens[0][1:] in grammar.patterns:
 			print(grammar.patterns[tokens[0][1:]])
 		elif len(tokens) > 2 and tokens[1] == "::=" and "->" in tokens:
-			grammar.parseGrammarLine(line)
+			grammar.parse_grammar_line(line)
 		else:
 			print("Kategoriat:")
 			for cat in grammar.patterns:

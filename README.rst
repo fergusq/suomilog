@@ -7,7 +7,7 @@ It's intended use is parsing Finnish sentences and it includes a module that can
 Context-free grammars
 ---------------------
 
-The ``suomilog.patternparser`` module is used for parsing context-free grammars.
+The ``suomilog`` module is used for parsing context-free grammars.
 Suomilog grammars are context-free grammars that have additional morphological information. Below is an example.
 
 ::

@@ -20,12 +20,12 @@ from typing import Literal
 import pypykko.utils as pykko
 from pypykko.reinflect import reinflect as pykko_reinflect
 from pypykko.tokenizer import text2tokens as pykko_tokenize
-from . import patternparser as pp
+from . import grammar
 
-DICTIONARY: defaultdict[str, list[pp.Token]] = defaultdict(list)
+DICTIONARY: defaultdict[str, list[grammar.Token]] = defaultdict(list)
 
-def tokenize(text: str) -> list[pp.Token]:
-	tokens: list[pp.Token] = []
+def tokenize(text: str) -> list[grammar.Token]:
+	tokens: list[grammar.Token] = []
 	for token in pykko_tokenize(text):
 		if token.strip() == "":
 			continue
@@ -38,7 +38,7 @@ def tokenize(text: str) -> list[pp.Token]:
 		if token.lower() in DICTIONARY:
 			alternatives += DICTIONARY[token.lower()]
 
-		tokens.append(pp.Token(token, alternatives))
+		tokens.append(grammar.Token(token, alternatives))
 
 	return tokens
 

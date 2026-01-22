@@ -15,8 +15,7 @@
 # along with this program. If not, see <http://www.gnu.org/licenses/>.
 
 from collections import defaultdict
-from typing import Callable, Sequence
-from . import patternparser as pp
+from . import grammar
 
 
 type CYKTable = defaultdict[tuple[int, int], set[str]]
@@ -25,35 +24,37 @@ type TokenOutputTable[OutputT] = defaultdict[tuple[int, int, str], set[OutputT]]
 
 
 class CYKParser[OutputT]:
-	token_rules: dict[str, pp.Token | pp.BasePattern[OutputT]]
+	token_rules: dict[str, grammar.Token | grammar.BaseRule[OutputT]]
 	one_rules: defaultdict[str, set[str]]
 	one_rules_expanded: defaultdict[str, set[str]]
 	two_rules: defaultdict[tuple[str, str], set[str]]
-	outputs: dict[tuple[str, str | tuple[str, str]], pp.Output[OutputT] | "DenormalizeStartOutput" | "DenormalizeChainOutput" | "DenormalizeEndOutput[OutputT]"]
+	outputs: dict[tuple[str, str | tuple[str, str]], grammar.Output[OutputT] | "DenormalizeStartOutput" | "DenormalizeChainOutput" | "DenormalizeEndOutput[OutputT]"]
 
-	def __init__(self, grammar: pp.Grammar[OutputT], root_category: str):
+	def __init__(self, grammar: grammar.Grammar[OutputT], root_category: str):
 		self.token_rules = {}
 		self.one_rules = defaultdict(set)
 		self.one_rules_expanded = defaultdict(set)
 		self.two_rules = defaultdict(set)
 		self.outputs = {}
 		self.grammar = grammar
-		self._toCNF(root_category)
+		self._to_CNF(root_category)
 
-	def _toCNF(self, root_category: str):
-		eg = self.grammar.expandBits(root_category, set())
+	def _to_CNF(self, root_category: str):
+		eg = self.grammar.expand_bits(root_category, set())
 		for category in eg:
 			for pattern in eg[category]:
-				if isinstance(pattern, pp.Pattern):
+				# Pattern-luokka on niille säännöille, jotka voi jäsentää CYK-algoritmilla.
+				# On myös sääntöjä, jotka perivät BasePatternin mutta eivät Patternia. Tällöin luokka toteuttaa match-metodin, joka hoitaa jäsentämisen omalla tavallaan.
+				if isinstance(pattern, grammar.ProductionRule):
 					new_words: list[str] = []
 					is_pattern: list[bool] = []
 					for word in pattern.words:
-						if isinstance(word, pp.Token):
-							self.token_rules[word.toCode()] = word
-							new_words.append(word.toCode())
+						if isinstance(word, grammar.Token):
+							self.token_rules[word.to_code()] = word
+							new_words.append(word.to_code())
 							is_pattern.append(False)
 						
-						elif isinstance(word, pp.PatternRef):
+						elif isinstance(word, grammar.Nonterminal):
 							new_words.append(word.name)
 							is_pattern.append(True)
 						
@@ -82,6 +83,8 @@ class CYKParser[OutputT]:
 						self.outputs[(prev, pair)] = DenormalizeStartOutput(is_pattern[-2], is_pattern[-1]) if len(new_words) > 2 else pattern.output
 
 				else:
+					# Oma sääntö.
+					# TODO: Tue muita kuin yhden saneen jäsentäviä omia sääntöjä.
 					self.token_rules[category] = pattern
 		
 		for a, b in list(self.one_rules.items()):
@@ -94,14 +97,14 @@ class CYKParser[OutputT]:
 						self.one_rules_expanded[a].add(rule)
 						queue.append(rule)
 	
-	def parse(self, tokens: list[pp.Token]) -> "CYKAnalysis[OutputT]":
+	def parse(self, tokens: list[grammar.Token]) -> "CYKAnalysis[OutputT]":
 		cyk_table: CYKTable = defaultdict(set)
 		split_table: SplitTable = defaultdict(set)
 		token_outputs: TokenOutputTable = defaultdict(set)
 		for i in range(len(tokens)):
 			for rule_name, token_rule in self.token_rules.items():
-				if isinstance(token_rule, pp.Token):
-					if tokens[i].token == token_rule.token or tokens[i].containsMatch(token_rule.toAlternatives(set())):
+				if isinstance(token_rule, grammar.Token):
+					if tokens[i].token == token_rule.token or tokens[i].contains_match(token_rule.to_alternatives(set())):
 						cyk_table[(i, i+1)] |= {rule_name} | self.one_rules_expanded[rule_name]
 				
 				elif token_output := token_rule.match(self.grammar, tokens[i:i+1], set()):
@@ -123,7 +126,7 @@ class CYKParser[OutputT]:
 	def print(self):
 		print("Token rules:")
 		for a, b in self.token_rules.items():
-			print(a, "<-", b.toCode())
+			print(a, "<-", b.to_code())
 		
 		print("One rules:")
 		for a, B in self.one_rules.items():
@@ -145,14 +148,14 @@ class CYKParser[OutputT]:
 
 
 class CYKAnalysis[OutputT]:
-	def __init__(self, cyk_parser: CYKParser[OutputT], tokens: list[pp.Token], cyk_table: CYKTable, split_table: SplitTable, token_outputs: TokenOutputTable):
+	def __init__(self, cyk_parser: CYKParser[OutputT], tokens: list[grammar.Token], cyk_table: CYKTable, split_table: SplitTable, token_outputs: TokenOutputTable):
 		self.cyk_parser = cyk_parser
 		self.tokens = tokens
 		self.cyk_table = cyk_table
 		self.split_table = split_table
 		self.token_outputs = token_outputs
 	
-	def getOutput(self, rule_name: str, start: int = 0, end: int = 0) -> set[OutputT] | None:
+	def get_output(self, rule_name: str, start: int = 0, end: int = 0) -> set[OutputT] | None:
 		if end <= 0:
 			end = len(self.tokens) - end
 
@@ -165,7 +168,7 @@ class CYKAnalysis[OutputT]:
 
 		for rule in self.cyk_table[(start, end)]:
 			if output := self.cyk_parser.outputs.get((rule_name, rule), None):
-				args = self.getOutput(rule, start, end)
+				args = self.get_output(rule, start, end)
 				assert args is not None
 				for arg in args:
 					ans.add(output.eval([arg]))
@@ -174,8 +177,8 @@ class CYKAnalysis[OutputT]:
 			for rule1 in self.cyk_table[(start, split)]:
 				for rule2 in self.cyk_table[(split, end)]:
 					if output := self.cyk_parser.outputs.get((rule_name, (rule1, rule2)), None):
-						args1 = self.getOutput(rule1, start, split)
-						args2 = self.getOutput(rule2, split, end)
+						args1 = self.get_output(rule1, start, split)
+						args2 = self.get_output(rule2, split, end)
 						assert args1 and args2 and len(args1) > 0 and len(args2) > 0
 						for arg1 in args1:
 							for arg2 in args2:
@@ -185,6 +188,30 @@ class CYKAnalysis[OutputT]:
 			return None
 		
 		return ans
+
+	def print(self) -> None:
+		try:
+			import rich
+
+		except ModuleNotFoundError:
+			print(self.cyk_table)
+			return
+
+		from rich.table import Table
+
+		size = len(self.tokens)
+		table = [[("" if row <= col else "X") for col in range(size)] for row in range(size)]
+		for start in range(size):
+			for end in range(start+1, size+1):
+				table[end-start-1][end-1] = ", ".join(sorted(self.cyk_table[(start, end)]))
+		
+		rtable = Table(show_lines=True, show_footer=True)
+		for token in self.tokens:
+			rtable.add_column(token.token, repr(token))
+		for row in reversed(table):
+			rtable.add_row(*row)
+		
+		rich.print(rtable)
 
 
 class DenormalizeStartOutput:
@@ -227,7 +254,7 @@ class DenormalizeChainOutput:
 
 
 class DenormalizeEndOutput[OutputT]:
-	def __init__(self, a_is_pattern: bool, output: pp.Output[OutputT]):
+	def __init__(self, a_is_pattern: bool, output: grammar.Output[OutputT]):
 		self.a_is_pattern = a_is_pattern
 		self.output = output
 

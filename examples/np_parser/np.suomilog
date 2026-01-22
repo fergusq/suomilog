@@ -45,12 +45,12 @@
 .NP-CASE ::= .NP{+pl,+com} -> $1
 
 
-.NP ::= .NP2{$} , .NP2{$} .CONJ .NP2{$} -> $1 , ($2) $3
+.NP ::= .NP2{$} ..{«,»} .NP2{$} .CONJ .NP2{$} -> $1 ($2 $3) $4
 .NP ::= .NP2{$} .CONJ .NP2{$} -> $1 ($2) $3
 .NP ::= .NP2{$} -> $1
 
-.NP2 ::= .NP-NUM{$} .NP-CASE -> $1 ($2)
-.NP2 ::= .NP-NUM{$} .VP-INF -> $1 ($2)
+.NP2 ::= .NP-NUM{$} .NP-CASE -> $1 ($2) :: 1
+.NP2 ::= .NP-NUM{$} .VP-INF -> $1 ($2) :: 1
 .NP2 ::= .NP-NUM{$} -> $1
 
 .NP-NUM ::= .NUM{$,+sg,+nom,!yksi:numeral} .NP-ADJ/NOUN{+sg,+par} -> $1 [$2]

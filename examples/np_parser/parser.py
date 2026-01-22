@@ -16,20 +16,32 @@
 
 import argparse
 import os
-from typing import Literal, Sequence
+from typing import Literal, NamedTuple, Sequence
 
-import suomilog.cykparser as cyk
-import suomilog.patternparser as pp
+import suomilog
 import suomilog.finnish as fiutils
 
 
 type AnnotatedToken = tuple[str, Literal["normal", "noinfl", "nonlemma_infl"]]
-type OutputT = tuple[AnnotatedToken, ...]
 
 
-class ReinflectorOutput(pp.Output[OutputT]):
+class OutputT(NamedTuple):
+	tokens: tuple[AnnotatedToken, ...]
+	weight: float
+
+
+class ReinflectorOutput(suomilog.Output[OutputT]):
 	def __init__(self, output: str):
 		# Jäsentää ulostulokoodin ("->" jälkeen tulevan koodin kieliopissa)
+		if "::" in output:
+			fields = output.split("::")
+			assert len(fields) == 2
+			output = fields[0].strip()
+			self.weight = float(fields[1])
+		
+		else:
+			self.weight = 0.0
+
 		words: list[AnnotatedToken] = [("", "normal")]
 		noinfl_depth = 0
 		nonlemma_infl_depth = 0
@@ -66,21 +78,25 @@ class ReinflectorOutput(pp.Output[OutputT]):
 
 	def eval(self, args: Sequence[OutputT]) -> OutputT:
 		argsmap = {f"${i+1}": arg for i, arg in enumerate(args)}
-		ans: list[AnnotatedToken] = []
+		tokens: list[AnnotatedToken] = []
+		weight = self.weight
 		for variable, state in self.annotations:
 			if variable not in argsmap:
 				raise Exception("Rule does not produce variable " + variable)
 
 			# Muuttujaa taivutetaan normaalisti, eli samalla tavalla kuin sisemmät säännöt taivuttavat sitä
 			if state == "normal":
-				ans += argsmap[variable]
+				tokens += argsmap[variable].tokens
+				weight += argsmap[variable].weight
 			
 			# Muussa tapauksessa ylikirjoitetaan sisemmän säännön taivutussääntö tämän säännön taivutussäännöllä
 			else:
-				for token, _ in argsmap[variable]:
-					ans.append((token, state))
+				for token, _ in argsmap[variable].tokens:
+					tokens.append((token, state))
+				
+				weight += argsmap[variable].weight
 		
-		return tuple(ans)
+		return OutputT(tuple(tokens), weight)
 
 
 def match_bits(tbits: set[str], bits: set[str]):
@@ -89,32 +105,29 @@ def match_bits(tbits: set[str], bits: set[str]):
 	return tbits >= positive_bits and not (tbits & negative_bits)
 
 
-class WordPattern(pp.BasePattern[OutputT]):
+class WordRule(suomilog.BaseRule[OutputT]):
 	def __init__(self, bits: set[str] = set()):
 		self.bits = set() | bits
 
 	def __repr__(self):
-		return f"WordPattern({repr(self.bits)})"
+		return f"WordRule({repr(self.bits)})"
 
-	def toCode(self):
+	def to_code(self):
 		if not self.bits:
-			return "<pattern that matches any single token>"
+			return "<rule that matches any single token>"
 		
 		else:
-			return f"<pattern that matches any single token with bits {{{','.join(self.bits)}}}>"
+			return f"<rule that matches any single token with bits {{{','.join(self.bits)}}}>"
 
-	def match(self, grammar: pp.Grammar[OutputT], tokens: list[pp.Token], bits: set[str]) -> list[OutputT]:
+	def match(self, grammar: suomilog.Grammar[OutputT], tokens: list[suomilog.Token], bits: set[str]) -> list[OutputT]:
 		bits = self.bits|bits
 		if len(tokens) != 1 or bits and not any(match_bits(altbits, bits) for _, altbits in tokens[0].alternatives):
 			return []
 
-		return [((tokens[0].token, "normal"),)]
+		return [OutputT(((tokens[0].token, "normal"),), 0.0)]
 
-	def allowsEmptyContent(self):
-		return False
-
-	def expandBits(self, name: str, grammar: pp.Grammar[OutputT], bits: set[str], extended=None):
-		return WordPattern(self.bits | bits)
+	def expand_bits(self, name: str, grammar: suomilog.Grammar[OutputT], bits: set[str], extended=None):
+		return WordRule(self.bits | bits)
 
 
 def main():
@@ -127,23 +140,23 @@ def main():
 	if args.debug:
 		import readline
 
-	grammar: pp.Grammar[OutputT] = pp.Grammar()
+	grammar: suomilog.Grammar[OutputT] = suomilog.Grammar()
 
-	grammar.patterns["."] = [
-		WordPattern()
+	grammar.rules["."] = [
+		WordRule()
 	]
 
 	path = os.path.dirname(os.path.realpath(__file__))
 	with open(os.path.join(path, "np.suomilog")) as file:
 		for line in file:
 			if "::=" in line and not line.startswith("#"):
-				grammar.parseGrammarLine(line.replace("\n", ""), default_output=ReinflectorOutput)
+				grammar.parse_grammar_line(line.replace("\n", ""), default_output=ReinflectorOutput)
 
-	parser = cyk.CYKParser(grammar, "ROOT")
+	parser = suomilog.CYKParser(grammar, "ROOT")
 	
 	if args.debug:
-		n_patterns = sum([len(category) for category in grammar.patterns.values()])
-		print("Ladattu", n_patterns, "fraasia.")
+		n_rules = sum([len(category) for category in grammar.rules.values()])
+		print("Ladattu", n_rules, "fraasia.")
 		grammar.print()
 		#parser.print()
 
@@ -164,11 +177,11 @@ def main():
 				print(tokens)
 
 			analysis = parser.parse(tokens)
-			outputs = analysis.getOutput(".ROOT{}")
+			outputs = analysis.get_output(".ROOT{}")
 			if not outputs:
 				if args.debug:
 					print("Jäsennys epäonnistui.")
-					print(analysis.cyk_table)
+					analysis.print()
 					print(analysis.split_table)
 				
 				else:
@@ -176,16 +189,16 @@ def main():
 
 				continue
 			
-			for output in outputs:
+			for output in sorted(outputs, key=lambda o: o.weight):
 				inflected = []
-				for token, state in output:
+				for token, state in output.tokens:
 					if state == "normal" or state == "nonlemma_infl":
 						token = list(fiutils.inflect_nominal(token, args.case_tag, args.plural_tag))[0]
 					
 					inflected.append(token)
 
 				if args.debug:
-					print(args.plural_tag + args.case_tag + " ->", " ".join(inflected))
+					print(args.plural_tag + args.case_tag + " ->", " ".join(inflected), f"(paino: {output.weight})")
 
 				else:
 					print(" ".join(inflected))

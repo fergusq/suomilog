@@ -11,3 +11,8 @@ dependencies = [
     "kfst-rs>=1.0.0",
     "pypykko>=0.3.0",
 ]
+
+[project.optional-dependencies]
+rich = [
+    "rich>=14.2.0",
+]
