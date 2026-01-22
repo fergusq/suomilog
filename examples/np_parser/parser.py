@@ -16,13 +16,19 @@
 
 import argparse
 import os
-from typing import Literal, NamedTuple, Sequence
+from typing import AbstractSet, Literal, NamedTuple, Sequence
 
 import suomilog
 import suomilog.finnish as fiutils
 
 
-type AnnotatedToken = tuple[str, Literal["normal", "noinfl", "nonlemma_infl"]]
+type Annotation = Literal["normal", "noinfl", "nonlemma_infl"]
+
+
+class AnnotatedToken(NamedTuple):
+	token: str
+	bits: AbstractSet[str]
+	annotation: Annotation
 
 
 class OutputT(NamedTuple):
@@ -42,7 +48,7 @@ class ReinflectorOutput(suomilog.Output[OutputT]):
 		else:
 			self.weight = 0.0
 
-		words: list[AnnotatedToken] = [("", "normal")]
+		words: list[tuple[str, Annotation]] = [("", "normal")]
 		noinfl_depth = 0
 		nonlemma_infl_depth = 0
 		for char in output:
@@ -77,22 +83,35 @@ class ReinflectorOutput(suomilog.Output[OutputT]):
 		self.annotations = words
 
 	def eval(self, args: Sequence[OutputT]) -> OutputT:
-		argsmap = {f"${i+1}": arg for i, arg in enumerate(args)}
+		argsmap: dict[str, OutputT] = {f"${i+1}": arg for i, arg in enumerate(args)}
 		tokens: list[AnnotatedToken] = []
 		weight = self.weight
 		for variable, state in self.annotations:
-			if variable not in argsmap:
-				raise Exception("Rule does not produce variable " + variable)
+			if "{" in variable and variable.endswith("}"):
+				i = variable.index("{")
+				bits = frozenset(variable[i+1:-1].split(","))
+				variable = variable[:i]
+
+			else:
+				bits = frozenset({"$"})
+
+			if not variable.startswith("$"):
+				# tämä ei olekaan muuttuja vaan tokeni
+				tokens.append(AnnotatedToken(variable, bits, state))
+
+			assert variable in argsmap, f"Variable {variable} does not exist (variables={argsmap})"
 
 			# Muuttujaa taivutetaan normaalisti, eli samalla tavalla kuin sisemmät säännöt taivuttavat sitä
 			if state == "normal":
-				tokens += argsmap[variable].tokens
+				for token in argsmap[variable].tokens:
+					tokens.append(AnnotatedToken(token.token, suomilog.merge_bits(bits, token.bits), token.annotation))
+
 				weight += argsmap[variable].weight
 			
 			# Muussa tapauksessa ylikirjoitetaan sisemmän säännön taivutussääntö tämän säännön taivutussäännöllä
 			else:
-				for token, _ in argsmap[variable].tokens:
-					tokens.append((token, state))
+				for token in argsmap[variable].tokens:
+					tokens.append(AnnotatedToken(token.token, suomilog.merge_bits(bits, token.bits), state))
 				
 				weight += argsmap[variable].weight
 		
@@ -100,8 +119,8 @@ class ReinflectorOutput(suomilog.Output[OutputT]):
 
 
 class WordRule(suomilog.BaseRule[OutputT]):
-	def __init__(self, bits: set[str] = set()):
-		self.bits = set() | bits
+	def __init__(self, bits: AbstractSet[str] = frozenset()):
+		self.bits = frozenset() | bits
 
 	def __repr__(self):
 		return f"WordRule({repr(self.bits)})"
@@ -113,14 +132,14 @@ class WordRule(suomilog.BaseRule[OutputT]):
 		else:
 			return f"<rule that matches any single token with bits {{{','.join(self.bits)}}}>"
 
-	def match(self, grammar: suomilog.Grammar[OutputT], tokens: Sequence[suomilog.Token], bits: set[str]) -> list[OutputT]:
+	def match(self, grammar: suomilog.Grammar[OutputT], tokens: Sequence[suomilog.Token], bits: AbstractSet[str]) -> list[OutputT]:
 		bits = self.bits|bits
 		if len(tokens) != 1 or bits and not any(suomilog.match_bits(altbits, bits) for _, altbits in tokens[0].alternatives):
 			return []
 
-		return [OutputT(((tokens[0].surfaceform, "normal"),), 0.0)]
+		return [OutputT((AnnotatedToken(tokens[0].surfaceform, frozenset(), "normal"),), 0.0)]
 
-	def expand_bits(self, name: str, grammar: suomilog.Grammar[OutputT], bits: set[str], extended=None):
+	def expand_bits(self, name: str, grammar: suomilog.Grammar[OutputT], bits: AbstractSet[str], extended=None):
 		return WordRule(self.bits | bits)
 
 
@@ -171,6 +190,7 @@ def main():
 				print(tokens)
 
 			analysis = parser.parse(tokens)
+			analysis.print()
 			outputs = analysis.get_output(".ROOT{}")
 			if not outputs:
 				if args.debug:
@@ -185,9 +205,18 @@ def main():
 			
 			for output in sorted(outputs, key=lambda o: o.weight):
 				inflected = []
-				for token, state in output.tokens:
-					if state == "normal" or state == "nonlemma_infl":
-						token = list(fiutils.inflect_nominal(token, args.case_tag, args.plural_tag))[0]
+				for token in output.tokens:
+					if token.annotation == "normal" or token.annotation == "nonlemma_infl":
+						case_tag = args.case_tag
+						plural_tag = args.plural_tag
+						for bit in token.bits:
+							if bit in fiutils.SINGULAR_AND_PLURAL_CASES+fiutils.PLURAL_CASES:
+								case_tag = bit
+							
+							if bit in ["+sg", "+pl"]:
+								plural_tag = bit
+
+						token = list(fiutils.inflect_nominal(token.token, case_tag, plural_tag))[0]
 					
 					inflected.append(token)
 

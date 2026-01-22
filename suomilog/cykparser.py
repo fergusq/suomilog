@@ -15,6 +15,7 @@
 # along with this program. If not, see <http://www.gnu.org/licenses/>.
 
 from collections import defaultdict
+from typing import NamedTuple, Sequence
 from . import grammar
 
 
@@ -28,7 +29,7 @@ class CYKParser[OutputT]:
 	one_rules: defaultdict[str, set[str]]
 	one_rules_expanded: defaultdict[str, set[str]]
 	two_rules: defaultdict[tuple[str, str], set[str]]
-	outputs: dict[tuple[str, str | tuple[str, str]], grammar.Output[OutputT] | "DenormalizeStartOutput" | "DenormalizeChainOutput" | "DenormalizeEndOutput[OutputT]"]
+	outputs: dict[tuple[str, str | tuple[str, str]], grammar.Output[OutputT] | "DenormalizeStartOutput[OutputT]" | "DenormalizeChainOutput[OutputT]" | "DenormalizeEndOutput[OutputT]"]
 
 	def __init__(self, grammar: grammar.Grammar[OutputT], root_nonterminal_name: str):
 		self.token_rules = {}
@@ -49,7 +50,7 @@ class CYKParser[OutputT]:
 					new_words: list[str] = []
 					is_nonterminal: list[bool] = []
 					for word in rule.words:
-						if isinstance(word, grammar.BaseformTerminal) or isinstance(word, grammar.SurfaceformTerminal):
+						if isinstance(word, grammar.Terminal):
 							self.token_rules[word.to_code()] = word
 							new_words.append(word.to_code())
 							is_nonterminal.append(False)
@@ -154,15 +155,23 @@ class CYKAnalysis[OutputT]:
 		self.cyk_table = cyk_table
 		self.split_table = split_table
 		self.token_outputs = token_outputs
-	
-	def get_output(self, rule_name: str, start: int = 0, end: int = 0) -> set[OutputT] | None:
+
+	def get_output(self, rule_name: str, start: int = 0, end: int = 0) -> frozenset[OutputT] | None:
+		ans = self._get_output(rule_name, start, end)
+		assert ans is None or all(not isinstance(arg, DenormalizedArgs) for arg in ans)
+		return ans  # type: ignore
+
+	def _get_output(self, rule_name: str, start: int = 0, end: int = 0) -> frozenset[OutputT | "DenormalizedArgs[OutputT]"] | None:
 		if end <= 0:
 			end = len(self.tokens) - end
 
 		if rule_name not in self.cyk_table[(start, end)]:
+			return frozenset()
+
+		if not rule_name.startswith("."):  # jos kyseessä on terminaali
 			return None
-		
-		ans = set()
+
+		ans: set[OutputT | DenormalizedArgs] = set()
 		if token_output := self.token_outputs.get((start, end, rule_name), None):
 			ans |= token_output
 
@@ -170,24 +179,44 @@ class CYKAnalysis[OutputT]:
 			if output := self.cyk_parser.outputs.get((rule_name, rule), None):
 				args = self.get_output(rule, start, end)
 				assert args is not None
+				assert isinstance(output, grammar.Output)
 				for arg in args:
-					ans.add(output.eval([arg]))
+					ans.add(output.eval((arg,)))
 
 		for split in self.split_table[(start, end, rule_name)]:
 			for rule1 in self.cyk_table[(start, split)]:
 				for rule2 in self.cyk_table[(split, end)]:
 					if output := self.cyk_parser.outputs.get((rule_name, (rule1, rule2)), None):
-						args1 = self.get_output(rule1, start, split)
-						args2 = self.get_output(rule2, split, end)
+						args1 = self._get_output(rule1, start, split)
+						args2 = self._get_output(rule2, split, end)
+
+						if args1 is None:
+							args1 = frozenset({None})
+
+						if args2 is None:
+							args2 = frozenset({None})
+
 						assert args1 and args2 and len(args1) > 0 and len(args2) > 0
 						for arg1 in args1:
+							assert not isinstance(arg1, DenormalizedArgs)
 							for arg2 in args2:
-								ans.add(output.eval([arg1, arg2]))
+								if isinstance(output, grammar.Output):
+									assert not isinstance(arg2, DenormalizedArgs)
+									ans.add(output.eval([arg for arg in (arg1, arg2) if arg is not None]))
+
+								elif isinstance(output, DenormalizeStartOutput):
+									assert not isinstance(arg2, DenormalizedArgs)
+									ans.add(output.start_chain(arg1, arg2))
+
+								elif isinstance(output, DenormalizeChainOutput):
+									assert isinstance(arg2, DenormalizedArgs)
+									ans.add(output.continue_chain(arg1, arg2))
+								
+								elif isinstance(output, DenormalizeEndOutput):
+									assert isinstance(arg2, DenormalizedArgs)
+									ans.add(output.end_chain(arg1, arg2))
 		
-		if not ans:
-			return None
-		
-		return ans
+		return frozenset(ans)
 
 	def print(self) -> None:
 		try:
@@ -214,7 +243,11 @@ class CYKAnalysis[OutputT]:
 		rich.print(rtable)
 
 
-class DenormalizeStartOutput:
+class DenormalizedArgs[OutputT](NamedTuple):
+	args: tuple[OutputT, ...]
+
+
+class DenormalizeStartOutput[OutputT]:
 	def __init__(self, a_is_nonterminal: bool, b_is_nonterminal: bool):
 		self.a_is_nonterminal = a_is_nonterminal
 		self.b_is_nonterminal = b_is_nonterminal
@@ -222,35 +255,38 @@ class DenormalizeStartOutput:
 	def __repr__(self):
 		return "DenormalizeStartOutput()"
 
-	def eval(self, args):
-		assert len(args) == 2
+	def start_chain(self, a: OutputT | None, b: OutputT | None) -> DenormalizedArgs[OutputT]:
 		if self.a_is_nonterminal and self.b_is_nonterminal:
-			return (args[0], args[1])
+			assert a is not None and b is not None
+			return DenormalizedArgs((a, b))
 		
 		elif self.a_is_nonterminal:
-			return (args[0],)
+			assert a is not None and b is None
+			return DenormalizedArgs((a,))
 		
 		elif self.b_is_nonterminal:
-			return (args[1],)
+			assert a is None and b is not None
+			return DenormalizedArgs((b,))
 		
 		else:
-			return ()
+			return DenormalizedArgs(())
 
 
-class DenormalizeChainOutput:
+class DenormalizeChainOutput[OutputT]:
 	def __init__(self, a_is_nonterminal: bool):
 		self.a_is_nonterminal = a_is_nonterminal
 
 	def __repr__(self):
 		return "DenormalizeChainOutput()"
 
-	def eval(self, args):
-		assert len(args) == 2
+	def continue_chain(self, arg: OutputT | None, args: DenormalizedArgs) -> DenormalizedArgs[OutputT]:
 		if self.a_is_nonterminal:
-			return (args[0],) + args[1]
+			assert arg is not None
+			return DenormalizedArgs((arg,) + args.args)
 		
 		else:
-			return args[1]
+			assert arg is None
+			return args
 
 
 class DenormalizeEndOutput[OutputT]:
@@ -261,12 +297,13 @@ class DenormalizeEndOutput[OutputT]:
 	def __repr__(self):
 		return "DenormalizeEndOutput(" + repr(self.output) + ")"
 
-	def eval(self, args):
-		assert len(args) == 2
+	def end_chain(self, arg: OutputT | None, args: DenormalizedArgs) -> OutputT:
 		if self.a_is_nonterminal:
-			args = (args[0],) + args[1]
+			assert arg is not None
+			args = DenormalizedArgs((arg,) + args.args)
 		
 		else:
-			args = args[1]
+			assert arg is None
+			args = args
 
-		return self.output.eval(args)
+		return self.output.eval(args.args)

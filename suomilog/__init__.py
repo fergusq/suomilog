@@ -15,6 +15,7 @@
 # along with this program. If not, see <http://www.gnu.org/licenses/>.
 
 from .grammar import match_bits as match_bits
+from .grammar import merge_bits as merge_bits
 
 from .grammar import Token as Token
 

@@ -15,13 +15,31 @@
 # along with this program. If not, see <http://www.gnu.org/licenses/>.
 
 from abc import ABC, abstractmethod
-from typing import Callable, NamedTuple, Self, Sequence
+from dataclasses import dataclass
+from typing import AbstractSet, Callable, Self, Sequence
 
 
-def match_bits(tbits: set[str], bits: set[str]):
+def match_bits(tbits: AbstractSet[str], bits: AbstractSet[str]):
 	positive_bits = {bit for bit in bits if not bit.startswith("!")}
 	negative_bits = {bit[1:] for bit in bits if bit.startswith("!")}
 	return tbits >= positive_bits and not (tbits & negative_bits)
+
+
+def merge_bits(tbits: AbstractSet[str], bits: AbstractSet[str]) -> frozenset[str]:
+	"""
+	The first argument is the bits on the symbol (including $ and minus bits).
+	The second argument is the incoming bits.
+
+	Adds the incoming bits to tbits if tbits contains $.
+	Removes any minus bits (bits preceded with a single backslash \\\\).
+
+	For example:
+	`merge_bits({"$", "\\\\+pl", "+sg"}, {"+pl", "+nom"}) == {"+sg", "+nom"}`
+	"""
+	new_bits = (tbits-{"$"}) | (bits if "$" in tbits else set())
+	minus_bits = {bit for bit in tbits if bit.startswith("\\")}  # Removes the minus bits themselves
+	minus_bits |= {minus_bit[1:] for minus_bit in minus_bits}  # Removes the matching plus bits
+	return frozenset(new_bits - minus_bits)
 
 
 class Token:
@@ -43,12 +61,31 @@ class Token:
 		return self.surfaceform + "[" + "/".join([baseform + "{" + ", ".join(bits) + "}" for baseform, bits in self.alternatives]) + "]"
 
 
-class BaseformTerminal(NamedTuple):
+class Terminal(ABC):
+	"""
+	The abstract base class of all terminal symbols.
+	"""
+
+	@abstractmethod	
+	def to_code(self) -> str:
+		...
+
+	@abstractmethod
+	def matches_token(self, token: Token) -> bool:
+		...
+
+	@abstractmethod
+	def expand_bits(self, bits: AbstractSet[str]) -> Self:
+		...
+
+
+@dataclass(frozen=True)
+class BaseformTerminal(Terminal):
 	"""
 	A terminal that matches to tokens that have at least one alternative with the given baseform and bits.
 	"""
 	baseform: str
-	bits: set[str]
+	bits: AbstractSet[str]
 
 	def to_code(self) -> str:
 		return self.baseform + "{" + ",".join(self.bits) + "}"
@@ -56,12 +93,13 @@ class BaseformTerminal(NamedTuple):
 	def matches_token(self, token: Token) -> bool:
 		return any([tbf == self.baseform and match_bits(tbits, self.bits) for tbf, tbits in token.alternatives])
 
-	def expand_bits(self, bits: set[str]) -> "BaseformTerminal":
-		new_bits = (self.bits-{"$"}) | (bits if "$" in self.bits else set())
-		return self._replace(bits=new_bits)
+	def expand_bits(self, bits: AbstractSet[str]) -> "BaseformTerminal":
+		new_bits = merge_bits(self.bits, bits)
+		return BaseformTerminal(self.baseform, new_bits)
 
 
-class SurfaceformTerminal(NamedTuple):
+@dataclass(frozen=True)
+class SurfaceformTerminal(Terminal):
 	"""
 	A terminal that matches to tokens with the correct surfaceform.
 	"""
@@ -73,23 +111,23 @@ class SurfaceformTerminal(NamedTuple):
 	def matches_token(self, token: Token) -> bool:
 		return token.surfaceform == self.surfaceform
 
-	def expand_bits(self, bits: set[str]) -> "SurfaceformTerminal":
+	def expand_bits(self, bits: AbstractSet[str]) -> "SurfaceformTerminal":
 		return self
 
 
-class Nonterminal(NamedTuple):
+@dataclass(frozen=True)
+class Nonterminal:
 	"""
 	A nonterminal that can appear on the right side of a production rule.
 	"""
 	name: str
-	bits: set[str]
+	bits: AbstractSet[str]
 	unexpanded: "Nonterminal | None" = None
 
 	def to_code(self):
 		return "." + self.name + ("{" + ",".join(self.bits) + "}" if self.bits else "")
 
 
-type Terminal = BaseformTerminal | SurfaceformTerminal
 type TerminalOrNonterminal = Terminal | Nonterminal
 
 
@@ -191,7 +229,7 @@ class Grammar[OutputT]:
 		else:
 			raise Exception("Syntax error on line `" + line + "'")
 
-	def expand_bits(self, nonterminal_name: str, bits: set[str], extended: dict[str, list["BaseRule[OutputT]"]] | None = None) -> tuple[str, dict[str, list["BaseRule[OutputT]"]]]:
+	def expand_bits(self, nonterminal_name: str, bits: AbstractSet[str], extended: dict[str, list["BaseRule[OutputT]"]] | None = None) -> tuple[str, dict[str, list["BaseRule[OutputT]"]]]:
 		if nonterminal_name not in self.rules:
 			return nonterminal_name, {}
 		
@@ -245,7 +283,7 @@ class BaseRule[OutputT](ABC):
 		...
 
 	@abstractmethod
-	def match(self, grammar: Grammar[OutputT], tokens: Sequence[Token], bits: set[str]) -> list[OutputT]:
+	def match(self, grammar: Grammar[OutputT], tokens: Sequence[Token], bits: AbstractSet[str]) -> list[OutputT]:
 		"""
 		The CYK parser calls this method for each range of tokens.
 		If it returns a non-empty list, then this rule is considered to match the range.
@@ -253,7 +291,7 @@ class BaseRule[OutputT](ABC):
 		...
 
 	@abstractmethod
-	def expand_bits(self, name: str, grammar: Grammar[OutputT], bits: set[str], extended: dict[str, list["BaseRule[OutputT]"]] | None = None) -> Self:
+	def expand_bits(self, name: str, grammar: Grammar[OutputT], bits: AbstractSet[str], extended: dict[str, list["BaseRule[OutputT]"]] | None = None) -> Self:
 		...
 
 
@@ -264,7 +302,7 @@ class ProductionRule[OutputT](BaseRule[OutputT]):
 
 	nonterminal_name: str
 	"""
-	The left side of the rule: the name of the nonterminal this rule produces.
+	The left side of the rule: the name of the nonterminal that produces the right side.
 	"""
 
 	words: Sequence[TerminalOrNonterminal]
@@ -296,10 +334,10 @@ class ProductionRule[OutputT](BaseRule[OutputT]):
 	def to_code(self):
 		return " ".join([w.to_code() for w in self.words])# + " -> " + repr(self.output)
 
-	def match(self, grammar: Grammar[OutputT], tokens: Sequence[Token], bits: set[str]) -> list[OutputT]:
+	def match(self, grammar: Grammar[OutputT], tokens: Sequence[Token], bits: AbstractSet[str]) -> list[OutputT]:
 		raise NotImplementedError("Use the CYKParser to parse this rule")
 
-	def expand_bits(self, name: str, grammar: Grammar[OutputT], bits: set[str], extended: dict[str, list[BaseRule[OutputT]]] | None = None):
+	def expand_bits(self, name: str, grammar: Grammar[OutputT], bits: AbstractSet[str], extended: dict[str, list[BaseRule[OutputT]]] | None = None):
 		positive_bits = set(bit for bit in bits if not bit.startswith("!"))
 		negative_bits = set(bit[1:] for bit in bits if bit.startswith("!"))
 		if not self.positive_bits <= positive_bits or self.negative_bits & positive_bits or self.positive_bits & negative_bits:
@@ -308,7 +346,7 @@ class ProductionRule[OutputT](BaseRule[OutputT]):
 		ans = []
 		for word in self.words:
 			if isinstance(word, Nonterminal):
-				new_bits = (word.bits-{"$"}) | (bits if "$" in word.bits else set())
+				new_bits = merge_bits(word.bits, bits)
 				new_name, _ = grammar.expand_bits(word.name, new_bits, extended)
 				ans += [Nonterminal(new_name, set(), unexpanded=word)]
 			
