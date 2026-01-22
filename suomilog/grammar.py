@@ -24,8 +24,14 @@ def match_bits(tbits: set[str], bits: set[str]):
 	return tbits >= positive_bits and not (tbits & negative_bits)
 
 
-
 class Token:
+	"""
+	Represents a token in the text to be parsed, typically a word or punctuation.
+
+	A token is made of two components:
+	1. The surfaceform, that is, the form in which the token is present in the tex
+	2. A list of analysis alternatives consisting of a baseform and a set of bits.
+	"""
 	def __init__(self, surfaceform: str, alternatives: list[tuple[str, set[str]]]):
 		self.surfaceform = surfaceform
 		self.alternatives = alternatives
@@ -38,6 +44,9 @@ class Token:
 
 
 class BaseformTerminal(NamedTuple):
+	"""
+	A terminal that matches to tokens that have at least one alternative with the given baseform and bits.
+	"""
 	baseform: str
 	bits: set[str]
 
@@ -53,6 +62,9 @@ class BaseformTerminal(NamedTuple):
 
 
 class SurfaceformTerminal(NamedTuple):
+	"""
+	A terminal that matches to tokens with the correct surfaceform.
+	"""
 	surfaceform: str
 
 	def to_code(self) -> str:
@@ -66,6 +78,9 @@ class SurfaceformTerminal(NamedTuple):
 
 
 class Nonterminal(NamedTuple):
+	"""
+	A nonterminal that can appear on the right side of a production rule.
+	"""
 	name: str
 	bits: set[str]
 	unexpanded: "Nonterminal | None" = None
@@ -78,12 +93,23 @@ type Terminal = BaseformTerminal | SurfaceformTerminal
 type TerminalOrNonterminal = Terminal | Nonterminal
 
 
-class Output[OutputT]:
+class Output[OutputT](ABC):
+	"""
+	A base class for rule outputs.
+	"""
+
+	@abstractmethod
 	def eval(self, args: Sequence[OutputT]) -> OutputT:
-		raise NotImplementedError()
+		"""
+		Constructs the output of the rule. `args` contains the outputs of the nonterminals in the rule.
+		"""
+		...
 
 
 class StringOutput(Output[str]):
+	"""
+	A simple output method that treats the output code as a template string and subtitutes variables $1, $2, and so on with the outputs of the first nonterminal, the second nonterminal, and so on.
+	"""
 	def __init__(self, string: str):
 		self.string = string
 
@@ -105,7 +131,7 @@ class StringOutput(Output[str]):
 class Grammar[OutputT]:
 	rules: dict[str, list["BaseRule[OutputT]"]]
 	"""
-	A mapping from nonterminals to rules.
+	A mapping from nonterminal names to rules.
 	"""
 
 	def __init__(self, rules: dict[str, list["BaseRule[OutputT]"]] | None = None, names: dict[str, str] | None = None):
@@ -209,12 +235,21 @@ def set_debug_level(n: int):
 
 
 class BaseRule[OutputT](ABC):
+	"""
+	Base class of all rules.
+
+	Custom parsing algorithms can be implemented by overriding the `match` method that will be called for each range of tokens.
+	"""
 	@abstractmethod
 	def to_code(self) -> str:
 		...
 
 	@abstractmethod
 	def match(self, grammar: Grammar[OutputT], tokens: Sequence[Token], bits: set[str]) -> list[OutputT]:
+		"""
+		The CYK parser calls this method for each range of tokens.
+		If it returns a non-empty list, then this rule is considered to match the range.
+		"""
 		...
 
 	@abstractmethod
@@ -223,8 +258,32 @@ class BaseRule[OutputT](ABC):
 
 
 class ProductionRule[OutputT](BaseRule[OutputT]):
-	def __init__(self, name: str, words: Sequence[TerminalOrNonterminal], output: Output[OutputT], bits: set[str] = set()):
-		self.name = name
+	"""
+	Represents a production rule. On the left side of the rule is a nonterminal name, on the right side is a list of terminals and nonterminals.
+	"""
+
+	nonterminal_name: str
+	"""
+	The left side of the rule: the name of the nonterminal this rule produces.
+	"""
+
+	words: Sequence[TerminalOrNonterminal]
+	"""
+	The right side of the rule: a sequence of nonterminals and terminals this rule matches to.
+	"""
+
+	output: Output[OutputT]
+	"""
+	The Output object used to produce the output of this rule.
+	"""
+
+	bits: set[str]
+	"""
+	When expanded, this rule can only be expanded if $ matches these bits.
+	"""
+
+	def __init__(self, nonterminal_name: str, words: Sequence[TerminalOrNonterminal], output: Output[OutputT], bits: set[str] = set()):
+		self.nonterminal_name = nonterminal_name
 		self.words = words
 		self.output = output
 		self.bits = set(bits)
@@ -232,7 +291,7 @@ class ProductionRule[OutputT](BaseRule[OutputT]):
 		self.negative_bits = set(bit[1:] for bit in bits if bit.startswith("!"))
 
 	def __repr__(self):
-		return "ProductionRule(" + repr(self.name) + ", " + repr(self.words) + ", " + repr(self.output) + ", bits=" + repr(self.bits) + ")"
+		return "ProductionRule(" + repr(self.nonterminal_name) + ", " + repr(self.words) + ", " + repr(self.output) + ", bits=" + repr(self.bits) + ")"
 
 	def to_code(self):
 		return " ".join([w.to_code() for w in self.words])# + " -> " + repr(self.output)
