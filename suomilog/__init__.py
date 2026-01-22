@@ -14,6 +14,8 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <http://www.gnu.org/licenses/>.
 
+from .grammar import match_bits as match_bits
+
 from .grammar import Token as Token
 
 from .grammar import Grammar as Grammar

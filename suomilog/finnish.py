@@ -16,7 +16,6 @@
 
 import re
 from collections import defaultdict
-from typing import Literal
 import pypykko.utils as pykko
 from pypykko.reinflect import reinflect as pykko_reinflect
 from pypykko.tokenizer import text2tokens as pykko_tokenize

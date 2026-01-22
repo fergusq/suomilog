@@ -15,54 +15,67 @@
 # along with this program. If not, see <http://www.gnu.org/licenses/>.
 
 from abc import ABC, abstractmethod
-from typing import Callable, Self, Sequence
+from typing import Callable, NamedTuple, Self, Sequence
+
+
+def match_bits(tbits: set[str], bits: set[str]):
+	positive_bits = {bit for bit in bits if not bit.startswith("!")}
+	negative_bits = {bit[1:] for bit in bits if bit.startswith("!")}
+	return tbits >= positive_bits and not (tbits & negative_bits)
+
 
 
 class Token:
-	def __init__(self, token: str, alternatives: list[tuple[str, set[str]]]):
-		self.token = token
+	def __init__(self, surfaceform: str, alternatives: list[tuple[str, set[str]]]):
+		self.surfaceform = surfaceform
 		self.alternatives = alternatives
 
 	def __repr__(self) -> str:
-		return "Token(" + repr(self.token) + ", " + repr(self.alternatives) + ")"
+		return "Token(" + repr(self.surfaceform) + ", " + repr(self.alternatives) + ")"
 
 	def __str__(self) -> str:
-		return self.token + "[" + "/".join([baseform + "{" + ", ".join(bits) + "}" for baseform, bits in self.alternatives]) + "]"
+		return self.surfaceform + "[" + "/".join([baseform + "{" + ", ".join(bits) + "}" for baseform, bits in self.alternatives]) + "]"
+
+
+class BaseformTerminal(NamedTuple):
+	baseform: str
+	bits: set[str]
 
 	def to_code(self) -> str:
-		return self.token or "/".join([baseform + "{" + ",".join(bits) + "}" for baseform, bits in self.alternatives])
+		return self.baseform + "{" + ",".join(self.bits) + "}"
 
-	def contains_match(self, alternatives: list[tuple[str, set[str]]]) -> bool:
-		return any([any([tbf == baseform and tbits >= bits for tbf, tbits in self.alternatives]) for baseform, bits in alternatives])
+	def matches_token(self, token: Token) -> bool:
+		return any([tbf == self.baseform and match_bits(tbits, self.bits) for tbf, tbits in token.alternatives])
 
-	def to_alternatives(self, bits: set[str]) -> list[tuple[str, set[str]]]:
-		return [(wbf, (wbits-{"$"})|(bits if "$" in wbits else wbits)) for wbf, wbits in self.alternatives]
-
-	def baseform(self, *tbits: str):
-		tbits_set = set(tbits)
-		for baseform, bits in self.alternatives:
-			if tbits_set <= bits:
-				return baseform
-		return None
-
-	def bits(self) -> set[str]:
-		bits = set()
-		for _, b in self.alternatives:
-			bits.update(b)
-		return bits
+	def expand_bits(self, bits: set[str]) -> "BaseformTerminal":
+		new_bits = (self.bits-{"$"}) | (bits if "$" in self.bits else set())
+		return self._replace(bits=new_bits)
 
 
-class Nonterminal:
-	def __init__(self, name: str, bits: set[str], unexpanded: "Nonterminal | None" = None):
-		self.name = name
-		self.bits = bits
-		self.unexpanded = unexpanded
+class SurfaceformTerminal(NamedTuple):
+	surfaceform: str
 
-	def __repr__(self):
-		return "Nonterminal(" + repr(self.name) + ", " + repr(self.bits) +  ((", unexpanded=" + repr(self.unexpanded)) if self.unexpanded else "") + ")"
+	def to_code(self) -> str:
+		return self.surfaceform
+
+	def matches_token(self, token: Token) -> bool:
+		return token.surfaceform == self.surfaceform
+
+	def expand_bits(self, bits: set[str]) -> "SurfaceformTerminal":
+		return self
+
+
+class Nonterminal(NamedTuple):
+	name: str
+	bits: set[str]
+	unexpanded: "Nonterminal | None" = None
 
 	def to_code(self):
 		return "." + self.name + ("{" + ",".join(self.bits) + "}" if self.bits else "")
+
+
+type Terminal = BaseformTerminal | SurfaceformTerminal
+type TerminalOrNonterminal = Terminal | Nonterminal
 
 
 class Output[OutputT]:
@@ -78,7 +91,7 @@ class StringOutput(Output[str]):
 		return "StringOutput(" + repr(self.string) + ")"
 
 	def eval(self, args):
-		args = [arg.token if isinstance(arg, Token) else str(arg) for arg in args]
+		args = [arg.surfaceform if isinstance(arg, Token) else str(arg) for arg in args]
 		ans = self.string
 		for i, a in enumerate(args):
 			var = "$"+str(i+1)
@@ -121,12 +134,13 @@ class Grammar[OutputT]:
 		tokens = line.replace("\t", " ").split(" ")
 		if len(tokens) > 2 and tokens[0].startswith(".") and tokens[1] == "::=" and (output is not None or "->" in tokens):
 			end = tokens.index("->") if "->" in tokens else len(tokens)
-			nonterminal = tokens[0][1:]
+			nonterminal_name = tokens[0][1:]
 			bits = set()
-			if "{" in nonterminal and nonterminal[-1] == "}":
-				bits = set(",".split(nonterminal[nonterminal.index("{")+1:-1]))
-				nonterminal = nonterminal[nonterminal.index("{")]
-			words = []
+			if "{" in nonterminal_name and nonterminal_name[-1] == "}":
+				bits = set(",".split(nonterminal_name[nonterminal_name.index("{")+1:-1]))
+				nonterminal_name = nonterminal_name[nonterminal_name.index("{")]
+
+			words: list[TerminalOrNonterminal] = []
 			for token in tokens[2:end]:
 				word = parse_word_in_grammar_line(token)
 				if not word:
@@ -134,8 +148,8 @@ class Grammar[OutputT]:
 					
 				words.append(word)
 
-			if nonterminal not in self.rules:
-				self.rules[nonterminal] = []
+			if nonterminal_name not in self.rules:
+				self.rules[nonterminal_name] = []
 
 			if "->" in tokens:
 				if output is not None or default_output is None:
@@ -145,44 +159,45 @@ class Grammar[OutputT]:
 				output = default_output(output_code)
 
 			assert output is not None
-			rule = ProductionRule(nonterminal, words, output, bits)
-			self.rules[nonterminal].append(rule)
+			rule = ProductionRule(nonterminal_name, words, output, bits)
+			self.rules[nonterminal_name].append(rule)
 			return rule
 		else:
 			raise Exception("Syntax error on line `" + line + "'")
 
-	def expand_bits(self, nonterminal: str, bits: set[str], extended: dict[str, list["BaseRule[OutputT]"]] | None = None) -> dict[str, list["BaseRule[OutputT]"]]:
-		if nonterminal not in self.rules:
-			return {}
+	def expand_bits(self, nonterminal_name: str, bits: set[str], extended: dict[str, list["BaseRule[OutputT]"]] | None = None) -> tuple[str, dict[str, list["BaseRule[OutputT]"]]]:
+		if nonterminal_name not in self.rules:
+			return nonterminal_name, {}
 		
 		ans: dict[str, list[BaseRule[OutputT]]] = extended or {}
-		name = "." + nonterminal + "{" + ",".join(sorted(bits)) + "}"
+		name = "." + nonterminal_name + "{" + ",".join(sorted(bits)) + "}"
 		if name in ans:
-			return ans
+			return name, ans
 
 		ans[name] = []
-		for rule in self.rules[nonterminal]:
+		for rule in self.rules[nonterminal_name]:
 			ans[name].append(rule.expand_bits(name, self, bits, ans))
 		
-		return ans
+		return name, ans
 
 
-def parse_word_in_grammar_line(token: str) -> Token | Nonterminal | None:
+def parse_word_in_grammar_line(token: str) -> BaseformTerminal | SurfaceformTerminal | Nonterminal | None:
 	if "{" in token and token[-1] == "}":
+		has_bits = True
 		bits = set(token[token.index("{")+1:-1].split(","))
 		token = token[:token.index("{")]
 	else:
+		has_bits = False
 		bits = set()
+
 	if token == "":
 		return None
-	elif token == ".":
-		return Token(".", [])
-	elif token[0] == ".":
+	elif token.startswith(".") and token != ".":
 		return Nonterminal(token[1:], bits)
-	elif bits:
-		return Token("", [(token, bits)])
+	elif has_bits:
+		return BaseformTerminal(token, bits)
 	else:
-		return Token(token, [])
+		return SurfaceformTerminal(token)
 
 
 debug_level = 0
@@ -199,7 +214,7 @@ class BaseRule[OutputT](ABC):
 		...
 
 	@abstractmethod
-	def match(self, grammar: Grammar[OutputT], tokens: list[Token], bits: set[str]) -> list[OutputT]:
+	def match(self, grammar: Grammar[OutputT], tokens: Sequence[Token], bits: set[str]) -> list[OutputT]:
 		...
 
 	@abstractmethod
@@ -208,7 +223,7 @@ class BaseRule[OutputT](ABC):
 
 
 class ProductionRule[OutputT](BaseRule[OutputT]):
-	def __init__(self, name: str, words: list[Token | Nonterminal], output: Output[OutputT], bits: set[str] = set()):
+	def __init__(self, name: str, words: Sequence[TerminalOrNonterminal], output: Output[OutputT], bits: set[str] = set()):
 		self.name = name
 		self.words = words
 		self.output = output
@@ -222,28 +237,23 @@ class ProductionRule[OutputT](BaseRule[OutputT]):
 	def to_code(self):
 		return " ".join([w.to_code() for w in self.words])# + " -> " + repr(self.output)
 
-	def match(self, grammar: Grammar[OutputT], tokens: list[Token], bits: set[str]) -> list[OutputT]:
+	def match(self, grammar: Grammar[OutputT], tokens: Sequence[Token], bits: set[str]) -> list[OutputT]:
 		raise NotImplementedError("Use the CYKParser to parse this rule")
 
 	def expand_bits(self, name: str, grammar: Grammar[OutputT], bits: set[str], extended: dict[str, list[BaseRule[OutputT]]] | None = None):
 		positive_bits = set(bit for bit in bits if not bit.startswith("!"))
 		negative_bits = set(bit[1:] for bit in bits if bit.startswith("!"))
 		if not self.positive_bits <= positive_bits or self.negative_bits & positive_bits or self.positive_bits & negative_bits:
-			return ProductionRule(name, [Token("<FALSE>", [])], self.output)
+			return ProductionRule(name, [BaseformTerminal("<FALSE>", {"!"})], self.output)
 		
 		ans = []
 		for word in self.words:
 			if isinstance(word, Nonterminal):
-				new_bits = (word.bits-{"$"})|(bits if "$" in word.bits else set())
-				new_name = "." + word.name + "{" + ",".join(sorted(new_bits)) + "}"
-				grammar.expand_bits(word.name, new_bits, extended)
+				new_bits = (word.bits-{"$"}) | (bits if "$" in word.bits else set())
+				new_name, _ = grammar.expand_bits(word.name, new_bits, extended)
 				ans += [Nonterminal(new_name, set(), unexpanded=word)]
 			
-			elif isinstance(word, Token):
-				new_alternatives = [(wbf, (wbits-{"$"})|(bits if "$" in wbits else set())) for wbf, wbits in word.alternatives]
-				ans += [Token(word.token, new_alternatives)]
-			
 			else:
-				assert False
+				ans.append(word.expand_bits(bits))
 		
 		return ProductionRule(name, ans, self.output)

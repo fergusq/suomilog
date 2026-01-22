@@ -99,12 +99,6 @@ class ReinflectorOutput(suomilog.Output[OutputT]):
 		return OutputT(tuple(tokens), weight)
 
 
-def match_bits(tbits: set[str], bits: set[str]):
-	positive_bits = {bit for bit in bits if not bit.startswith("!")}
-	negative_bits = {bit[1:] for bit in bits if bit.startswith("!")}
-	return tbits >= positive_bits and not (tbits & negative_bits)
-
-
 class WordRule(suomilog.BaseRule[OutputT]):
 	def __init__(self, bits: set[str] = set()):
 		self.bits = set() | bits
@@ -119,12 +113,12 @@ class WordRule(suomilog.BaseRule[OutputT]):
 		else:
 			return f"<rule that matches any single token with bits {{{','.join(self.bits)}}}>"
 
-	def match(self, grammar: suomilog.Grammar[OutputT], tokens: list[suomilog.Token], bits: set[str]) -> list[OutputT]:
+	def match(self, grammar: suomilog.Grammar[OutputT], tokens: Sequence[suomilog.Token], bits: set[str]) -> list[OutputT]:
 		bits = self.bits|bits
-		if len(tokens) != 1 or bits and not any(match_bits(altbits, bits) for _, altbits in tokens[0].alternatives):
+		if len(tokens) != 1 or bits and not any(suomilog.match_bits(altbits, bits) for _, altbits in tokens[0].alternatives):
 			return []
 
-		return [OutputT(((tokens[0].token, "normal"),), 0.0)]
+		return [OutputT(((tokens[0].surfaceform, "normal"),), 0.0)]
 
 	def expand_bits(self, name: str, grammar: suomilog.Grammar[OutputT], bits: set[str], extended=None):
 		return WordRule(self.bits | bits)
