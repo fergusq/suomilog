@@ -201,8 +201,9 @@ class Grammar[OutputT]:
 			nonterminal_name = tokens[0][1:]
 			bits = set()
 			if "{" in nonterminal_name and nonterminal_name[-1] == "}":
-				bits = set(",".split(nonterminal_name[nonterminal_name.index("{")+1:-1]))
-				nonterminal_name = nonterminal_name[nonterminal_name.index("{")]
+				i = nonterminal_name.index("{")
+				bits = set(nonterminal_name[i+1:-1].split(","))
+				nonterminal_name = nonterminal_name[:i]
 
 			words: list[TerminalOrNonterminal] = []
 			for token in tokens[2:end]:
@@ -332,7 +333,11 @@ class ProductionRule[OutputT](BaseRule[OutputT]):
 		return "ProductionRule(" + repr(self.nonterminal_name) + ", " + repr(self.words) + ", " + repr(self.output) + ", bits=" + repr(self.bits) + ")"
 
 	def to_code(self):
-		return " ".join([w.to_code() for w in self.words])# + " -> " + repr(self.output)
+		ans = ""
+		if self.bits:
+			ans += "{" + ",".join(self.bits) + "} "
+		ans += " ".join([w.to_code() for w in self.words])# + " -> " + repr(self.output)
+		return ans
 
 	def match(self, grammar: Grammar[OutputT], tokens: Sequence[Token], bits: AbstractSet[str]) -> list[OutputT]:
 		raise NotImplementedError("Use the CYKParser to parse this rule")

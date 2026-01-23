@@ -98,6 +98,7 @@ class ReinflectorOutput(suomilog.Output[OutputT]):
 			if not variable.startswith("$"):
 				# tämä ei olekaan muuttuja vaan tokeni
 				tokens.append(AnnotatedToken(variable, bits, state))
+				continue
 
 			assert variable in argsmap, f"Variable {variable} does not exist (variables={argsmap})"
 
@@ -204,7 +205,7 @@ def main():
 				continue
 			
 			for output in sorted(outputs, key=lambda o: o.weight):
-				inflected = []
+				inflected: list[str] = []
 				for token in output.tokens:
 					if token.annotation == "normal" or token.annotation == "nonlemma_infl":
 						case_tag = args.case_tag
@@ -216,9 +217,12 @@ def main():
 							if bit in ["+sg", "+pl"]:
 								plural_tag = bit
 
-						token = list(fiutils.inflect_nominal(token.token, case_tag, plural_tag))[0]
+						new_surfaceform = list(fiutils.inflect_nominal(token.token, case_tag, plural_tag))[0]
 					
-					inflected.append(token)
+					else:
+						new_surfaceform = token.token
+					
+					inflected.append(new_surfaceform)
 
 				if args.debug:
 					print(args.plural_tag + args.case_tag + " ->", " ".join(inflected), f"(paino: {output.weight})")
