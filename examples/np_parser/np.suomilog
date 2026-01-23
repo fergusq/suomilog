@@ -161,8 +161,14 @@ Näiden sääntöjen edessä ei ole valinnaista adverbiaalilausekketta, sillä s
 ### Perussanaluokat ###
 
 .NOUN ::= ..{$,:noun} -> $1
-.NOUN ::= ..{$,:proper} -> $1
 .NOUN ::= ..{$,:verb,+inf4} -> $1
+
+# Erikoistapaus: monisaneinen erisnimi
+
+.NOUN ::= .NOUN-PROP{$} -> $1
+.NOUN-PROP ::= .NOUN-PROP{$} ..{$,:proper} -> ($1) $2
+.NOUN-PROP ::= ..{$,:proper} -> $1
+
 .PRONOUN ::= ..{$,:pronoun} -> $1
 .ADJ ::= ..{$,:adjective} -> $1
 .ADJ ::= ..{$,:participle} -> $1
