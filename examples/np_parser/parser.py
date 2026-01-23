@@ -17,6 +17,8 @@
 import argparse
 import os
 from typing import AbstractSet, Literal, NamedTuple, Sequence
+import itertools
+import functools
 
 import suomilog
 import suomilog.finnish as fiutils
@@ -143,6 +145,56 @@ class WordRule(suomilog.BaseRule[OutputT]):
 	def expand_bits(self, name: str, grammar: suomilog.Grammar[OutputT], bits: AbstractSet[str], extended=None):
 		return WordRule(self.bits | bits)
 
+@functools.cache
+def get_parser():
+	grammar: suomilog.Grammar[OutputT] = suomilog.Grammar()
+
+	grammar.rules["."] = [
+		WordRule()
+	]
+
+	path = os.path.dirname(os.path.realpath(__file__))
+	with open(os.path.join(path, "np.suomilog")) as file:
+		for line in file:
+			if "::=" in line and not line.startswith("#"):
+				grammar.parse_grammar_line(line.replace("\n", ""), default_output=ReinflectorOutput)
+	return suomilog.CYKParser(grammar, "ROOT")
+
+def reinflect(term: str, case_tag: str, plural_tag: str, poss: str = "") -> list[str]:
+
+
+	parser = get_parser()
+
+	tokens = fiutils.tokenize(term)
+
+	analysis = parser.parse(tokens)
+	#analysis.print()
+	outputs = analysis.get_output(".ROOT{}")
+	if not outputs:
+		return []
+
+	result = []
+
+	for output in sorted(outputs, key=lambda o: o.weight):
+		inflected: list[list[str]] = []
+		for token in output.tokens:
+			if token.annotation == "normal" or token.annotation == "nonlemma_infl":
+				for bit in token.bits:
+					if bit in fiutils.SINGULAR_AND_PLURAL_CASES+fiutils.PLURAL_CASES:
+						case_tag = bit
+					
+					if bit in ["+sg", "+pl"]:
+						plural_tag = bit
+
+				new_surfaceform = list(fiutils.inflect_nominal(token.token, case_tag, plural_tag, poss))
+			
+			else:
+				new_surfaceform = [token.token]
+			
+			inflected.append(new_surfaceform)
+		
+		result.extend([" ".join(x) for x in itertools.product(*inflected)])
+	return result
 
 def main():
 	argparser = argparse.ArgumentParser()

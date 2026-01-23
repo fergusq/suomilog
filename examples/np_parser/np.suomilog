@@ -49,6 +49,10 @@
 # Substantiivilausekkeet
 ###############################################################################
 
+
+Substantiivilauseke määrittämässä erisnimeä (esim ammatit)
+.NP ::= .NP{$} .NOUN-PROP{$} -> ($1) $2
+
 Näillä säännöillä on hierarkia, joka asettaa eri attribuuttien "laskujärjestyksen".
 
 .NP ::= .NP2-PLURAL{$} -> $1
@@ -70,6 +74,7 @@ vaikka konjunktiolauseke kokonaisuudessa on monikollinen.
 
 .NP2-KEEP-PLURALITY ::= .NP2{$,+sg,\+pl} -> $1{+sg}
 .NP2-KEEP-PLURALITY ::= .NP2{$,+pl} -> $1{+pl}
+.NP2-KEEP-PLURALITY ::= .OBL -> ($1) :: 1
 
 Substantiivilausekkeen perässä olevalle obliikville tai infinitiivirakenteelle on asetettu paino,
 koska nämä ovat keskimääräistä harvinaisempia rakenteita:
@@ -101,6 +106,10 @@ Adjektiivi- ja genetiiviattribuutit:
 .NP-ADJ/NOUN ::= .AP{$} .NP-ADJ/NOUN{$} -> $1 $2
 .NP-ADJ/NOUN ::= .GEN .NP-ADJ/NOUN{$} -> ($1) $2
 .NP-ADJ/NOUN ::= .NOUN{$} -> $1
+
+# Halutaan voida taivuttaa myös adjektiiveja erityisesti koska ne voivat vakiintua uusiin substantiivisiin merkityksiin
+
+.NP-ADJ/NOUN ::= .AP{$} -> $1
 
 ###############################################################################
 # Attribuutit

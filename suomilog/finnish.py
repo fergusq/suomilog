@@ -80,15 +80,13 @@ PLURAL_CASES = [
 	"+com",
 ]
 
-def inflect_nominal(word: str, case_tag: str, plural_tag: str):
-	assert plural_tag in ["+sg", "+pl"]
+def inflect_nominal(word: str, case_tag: str, plural_tag: str, poss_tag: str = ""):
+	assert plural_tag in ["+sg", "+pl"], plural_tag
 	if plural_tag == "+pl":
 		assert case_tag in SINGULAR_AND_PLURAL_CASES or case_tag in PLURAL_CASES
 	
 	else:
 		assert case_tag in SINGULAR_AND_PLURAL_CASES
-	
-
 
 	new_morphtags = []
 	for analysis in pykko.analyze(word):
@@ -115,5 +113,7 @@ def inflect_nominal(word: str, case_tag: str, plural_tag: str):
 	
 	else:
 		new_morphtags = [plural_tag, case_tag]
+
+	new_morphtags.append(poss_tag)
 
 	return pykko_reinflect(word, "".join(new_morphtags))
