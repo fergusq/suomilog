@@ -45,59 +45,120 @@
 .NP-CASE ::= .NP{+pl,+com} -> $1
 
 
-.NP ::= .NP2{$} ..{«,»} .NP2{$} .CONJ .NP2{$} -> $1 ($2 $3) $4
-.NP ::= .NP2{$} .CONJ .NP2{$} -> $1 ($2) $3
+###############################################################################
+# Substantiivilausekkeet
+###############################################################################
+
+Näillä säännöillä on hierarkia, joka asettaa eri attribuuttien "laskujärjestyksen".
+
+.NP ::= .NP2-PLURAL{$} -> $1
 .NP ::= .NP2{$} -> $1
 
-.NP2 ::= .NP-NUM{$} .NP-CASE -> $1 ($2) :: 1
-.NP2 ::= .NP-NUM{$} .VP-INF -> $1 ($2) :: 1
-.NP2 ::= .NP-NUM{$} -> $1
+Konjunktioilla erotetut lausekkeet tulkitaan aina monikollisiksi.
+(TODO: eikö tai-lausekkeet voi olla yksiköllisiä?)
+Vasemmalla puolella oleva !+sg-bitti estää sääntöä laajentumasta, jos sille on annettu ylhäältä +sg-bitti
+
+.NP2-PLURAL{!+sg} ::= .NP2-COMMA-LIST{$} .CONJ .NP2-KEEP-PLURALITY{$} -> $1 ($2) $3
+
+.NP2-COMMA-LIST ::= .NP2-KEEP-PLURALITY{$} , .NP2-COMMA-LIST{$} -> $1 (,) $2
+.NP2-COMMA-LIST ::= .NP2-KEEP-PLURALITY{$} -> $1
+
+Keep plurality -sääntö yliajaa ylhäältä annetut +pl-bitit ja sallii yksikölliset lausekkeet.
+\+pl-bitti on miinusbitti, joka poistaa dollarista +pl-bitin jos sellainen on.
+Näin konjunktiolausekkeen sisällä voi olla yksiköllisiä lausekkeita,
+vaikka konjunktiolauseke kokonaisuudessa on monikollinen.
+
+.NP2-KEEP-PLURALITY ::= .NP2{$,+sg,\+pl} -> $1{+sg}
+.NP2-KEEP-PLURALITY ::= .NP2{$,+pl} -> $1{+pl}
+
+Substantiivilausekkeen perässä olevalle obliikville tai infinitiivirakenteelle on asetettu paino,
+koska nämä ovat keskimääräistä harvinaisempia rakenteita:
+
+.NP2 ::= .NP3{$} .OBL -> $1 ($2) :: 1
+.NP2 ::= .NP3{$} .VP-INF -> $1 ($2) :: 1
+.NP2 ::= .NP3{$} -> $1
+
+Alla on säännöt demonstratiivipronomineille ja artikkeleille.
+Ne ottavat huomioon tapauksia kuten "ne kolme taloa" tai "kauniit kolme taloa",
+jossa on monikollinen artikkeli tai adjektiivi yksiköllisen lukuilmauksen edessä.
+
+.NP3 ::= .ART{$} .NP-ADJ/NOUN{$} -> $1 $2
+.NP3 ::= .ART{$,+pl,\+sg} .NP-NUM{$,+sg} -> $1{+pl} $2
+.NP3 ::= .ART{$,+pl,\+sg} .AP{$,+pl,\+sg} .NP-NUM{$,+sg} -> $1{+pl} $2{+pl} $3
+.NP3 ::= .AP{$,+pl,\+sg} .NP-NUM{$,+sg} -> $1{+pl} $2
+.NP3 ::= .NP-NUM{$} -> $1
+.NP3 ::= .NP-ADJ/NOUN{$} -> $1
+
+Alla säännöt lukuilmauksille.
+Sanalla "yksi" on erikoisasema, koska sen jälkeen substantiivi ei taivu partitiivissa vaan nominatiivissa.
 
 .NP-NUM ::= .NUM{$,+sg,+nom,!yksi:numeral} .NP-ADJ/NOUN{+sg,+par} -> $1 [$2]
 .NP-NUM ::= .NUM{$,+sg,+nom,yksi:numeral} .NP-ADJ/NOUN{+sg,+nom} -> $1 $2
 .NP-NUM ::= .NUM{$,!+sg+nom} .NP-ADJ/NOUN{$} -> $1 [$2]
-.NP-NUM ::= .NP-ADJ/NOUN{$} -> $1
+
+Adjektiivi- ja genetiiviattribuutit:
 
 .NP-ADJ/NOUN ::= .AP{$} .NP-ADJ/NOUN{$} -> $1 $2
 .NP-ADJ/NOUN ::= .GEN .NP-ADJ/NOUN{$} -> ($1) $2
 .NP-ADJ/NOUN ::= .NOUN{$} -> $1
 
+###############################################################################
+# Attribuutit
+###############################################################################
+
+### Adjektiiviattribuutit ja partisiipit ###
+
 .AP ::= .ADJ{$} -> $1
 .AP ::= .ADVP .ADJ{$} -> ($1) $2
 .AP ::= .ADJ{+sg,+gen} .ADJ{$} -> ($1) $2
 
+# Agenttipartisiippi
+
 .AP ::= .GEN .VERB{$,+part_ma} -> ($1) $2
 .AP ::= .GEN .ADVP .VERB{$,+part_ma} -> ($1 $2) $3
 
+# Kopulapartisiipit ("etsimässä ollut")
+
 .AP ::= .VP-INF .COP-PART{$} -> ($1) $2
+.AP ::= .ADVP .VP-INF .COP-PART{$} -> ($1 $2) $3
+
+# Muut partisiipit
+
 .AP ::= .VP-PART{$} -> $1
+.AP ::= .ADVP .VP-PART{$} -> ($1) $2
+
+### Genetiiviattribuutit ###
 
 .GEN ::= .NP{+gen} -> $1
 .GEN ::= .PRONOUN{+gen} -> $1
 
+### Adverbiaalit ja obliikvit ###
+
 .ADVP ::= .ADV -> $1
-.ADVP ::= .NP-CASE -> $1
+.ADVP ::= .OBL -> $1
+
+.OBL ::= .NP-CASE -> $1
+.OBL ::= .GEN .ADPOS -> $1 $2
+
+###############################################################################
+# Verbirakenteet
+###############################################################################
+
+Näiden sääntöjen edessä ei ole valinnaista adverbiaalilausekketta, sillä se on .AP-kohdassa.
 
 .VP-INF ::= .VERB{$,+inf3} -> $1
-.VP-INF ::= .NP-CASE .VERB{$,+inf3} -> $1 $2
-.VP-INF ::= .NP-CASE .ADVP .VERB{$,+inf3} -> $1 $2 $3
-
-.COP-PART ::= ..{$,oleva:participle} -> $1
-.COP-PART ::= ..{$,ollut:participle} -> $1
+.VP-INF ::= .OBL .VERB{$,+inf3} -> $1 $2
+.VP-INF ::= .OBL .ADVP .VERB{$,+inf3} -> $1 $2 $3
 
 .VP-PART ::= .VERB-PART{$} -> $1
-.VP-PART ::= .NP-CASE .VERB-PART{$} -> ($1) $2
-.VP-PART ::= .NP-CASE .ADVP .VERB-PART{$} -> ($1 $2) $3
+.VP-PART ::= .OBL .VERB-PART{$} -> ($1) $2
+.VP-PART ::= .OBL .ADVP .VERB-PART{$} -> ($1 $2) $3
 
-.VERB-PART ::= .VERB{$,+part_pres} -> $1
-.VERB-PART ::= .VERB{$,+part_past} -> $1
-.VERB-PART ::= .VERB{$,+part_maton} -> $1
-.VERB-PART ::= .VERB{$,+part_ma,+poss1sg} -> $1
-.VERB-PART ::= .VERB{$,+part_ma,+poss2sg} -> $1
-.VERB-PART ::= .VERB{$,+part_ma,+poss3sg} -> $1
-.VERB-PART ::= .VERB{$,+part_ma,+poss1pl} -> $1
-.VERB-PART ::= .VERB{$,+part_ma,+poss2pl} -> $1
-.VERB-PART ::= .VERB{$,+part_ma,+poss3pl} -> $1
+###############################################################################
+# Sanetaso
+###############################################################################
+
+### Perussanaluokat ###
 
 .NOUN ::= ..{$,:noun} -> $1
 .NOUN ::= ..{$,:proper} -> $1
@@ -109,3 +170,38 @@
 .CONJ ::= ..{:conjunction} -> $1
 .ADV ::= ..{:adverb} -> $1
 .VERB ::= ..{$,:verb} -> $1
+.ADPOS ::= ..{$,:adposition} -> $1
+
+### Verbit ###
+
+# Kopulapartisiipit
+
+.COP-PART ::= ..{$,oleva:participle} -> $1
+.COP-PART ::= ..{$,ollut:participle} -> $1
+
+# Partisiipit
+
+Huom! Tämä ei sisällä omistusliitteetöntä agenttipartisiippia, sillä se ei voi esiintyä yksinään vaan tarvitsee eteensä genetiivilausekkeen. Sen sääntö on ylempänä.
+
+.VERB-PART ::= .VERB{$,+part_pres} -> $1
+.VERB-PART ::= .VERB{$,+part_past} -> $1
+.VERB-PART ::= .VERB{$,+part_maton} -> $1
+.VERB-PART ::= .VERB{$,+part_ma,+poss1sg} -> $1
+.VERB-PART ::= .VERB{$,+part_ma,+poss2sg} -> $1
+.VERB-PART ::= .VERB{$,+part_ma,+poss3sg} -> $1
+.VERB-PART ::= .VERB{$,+part_ma,+poss1pl} -> $1
+.VERB-PART ::= .VERB{$,+part_ma,+poss2pl} -> $1
+.VERB-PART ::= .VERB{$,+part_ma,+poss3pl} -> $1
+
+### Demonstratiivipronominit, artikkelit, kvanttoripronominit sun muut ###
+
+.ART ::= ..{$,tämä:pronoun} -> $1
+.ART ::= ..{$,tuo:pronoun} -> $1
+.ART ::= ..{$,se:pronoun} -> $1
+.ART ::= ..{$,jokin:pronoun} -> $1
+.ART ::= ..{$,joku:pronoun} -> $1
+
+TODO: Sanasta kaikki tulee ongelmia. Sen yksikön nominatiivi "kaikki" onkin monikollinen ilmauksissa kuten "kaikki talot" (eikä kaiket talot). Alla oleva koodi ottaa tämän vain osittain huomioon.
+
+.ART ::= ..{$,kaikki:pronoun,!«kaikki»} -> $1
+.ART ::= ..{$,kaikki:pronoun,«kaikki»,\+pl} -> $1
