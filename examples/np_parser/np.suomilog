@@ -74,7 +74,6 @@ vaikka konjunktiolauseke kokonaisuudessa on monikollinen.
 
 .NP2-KEEP-PLURALITY ::= .NP2{$,+sg,\+pl} -> $1{+sg}
 .NP2-KEEP-PLURALITY ::= .NP2{$,+pl} -> $1{+pl}
-.NP2-KEEP-PLURALITY ::= .OBL -> ($1) :: 1
 
 Substantiivilausekkeen perässä olevalle obliikville tai infinitiivirakenteelle on asetettu paino,
 koska nämä ovat keskimääräistä harvinaisempia rakenteita:
@@ -142,6 +141,10 @@ Adjektiivi- ja genetiiviattribuutit:
 .GEN ::= .PRONOUN{+gen} -> $1
 
 ### Adverbiaalit ja obliikvit ###
+
+.ADVP ::= .ADVP-COMMA-LIST .CONJ .ADVP -> $1 ($2) $3
+.ADVP-COMMA-LIST ::= .ADVP-COMMA-LIST , .ADVP-COMMA-LIST -> $1 (,) $2
+.ADVP-COMMA-LIST ::= .ADVP -> $1
 
 .ADVP ::= .ADV -> $1
 .ADVP ::= .OBL -> $1
