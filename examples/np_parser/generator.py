@@ -34,7 +34,7 @@ while True:
 		for case in ("+ins", "+com"):
 			tags.append((case, "+pl", poss))
 	for case, plurality, poss in tags:
-		for x in parser.reinflect(term, case, plurality, poss):
+		for x in parser.reinflect(term, plurality, case, poss):
 			if x not in res:
 				res.append(x)
 			
