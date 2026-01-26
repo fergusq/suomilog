@@ -137,13 +137,15 @@ Ellipsit:
 
 # Adjektiivit
 
-.AP ::= .ADJ{$} -> $1
-.AP ::= .ADVP .ADJ{$} -> ($1) $2
-.AP ::= .ADJ{+sg,+gen} .ADJ{$} -> ($1) $2
+$no-poss = {\+poss1sg,\+poss2sg,\+poss3sg,\+poss1pl,\+poss2pl,\+poss3pl}
+
+.AP ::= .ADJ{$,$no-poss} -> $1
+.AP ::= .ADVP .ADJ{$,$no-poss} -> ($1) $2
+.AP ::= .ADJ{+sg,+gen} .ADJ{$,$no-poss} -> ($1) $2
 
 # Järjestysluvut
 
-.AP ::= .ORD{$} -> $1
+.AP ::= .ORD{$,$no-poss} -> $1
 
 # Agenttipartisiippi
 
