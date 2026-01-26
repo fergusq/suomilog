@@ -25,13 +25,33 @@ DICTIONARY: defaultdict[str, list[grammar.Token]] = defaultdict(list)
 
 def tokenize(text: str) -> list[grammar.Token]:
 	tokens: list[grammar.Token] = []
+	token: str
 	for token in pykko_tokenize(text):
+		tokenizer_bits = set()
+		if token[:1] == "\"":
+			token = token[1:]
+			tokenizer_bits.add("-lquote")
+
+		if token[-1:] == "\"":
+			token = token[:-1]
+			tokenizer_bits.add("-rquote")
+
+		if token[:1] == "-":
+			token = token[1:]
+			tokenizer_bits.add("-lhyphen")
+
+		if token[-1:] == "-":
+			token = token[:-1]
+			tokenizer_bits.add("-rhyphen")
+
 		if token.strip() == "":
 			continue
 
 		alternatives = []
 		for word in pykko.analyze(token):
-			alternatives.append(baseformAndBits(word))
+			baseform, bits = baseformAndBits(word)
+			bits |= tokenizer_bits
+			alternatives.append((baseform, bits))
 
 		# Jos sana löytyy suomilogin omasta sanakirjasta, lisää myös sieltä vaihtoehdot
 		if token.lower() in DICTIONARY:
@@ -80,7 +100,7 @@ PLURAL_CASES = [
 	"+com",
 ]
 
-def inflect_nominal(word: str, case_tag: str, plural_tag: str, poss_tag: str = ""):
+def inflect_nominal(word: str, plural_tag: str, case_tag: str, poss_tag: str = ""):
 	assert plural_tag in ["+sg", "+pl"], plural_tag
 	if plural_tag == "+pl":
 		assert case_tag in SINGULAR_AND_PLURAL_CASES or case_tag in PLURAL_CASES

@@ -111,10 +111,11 @@ class ReinflectorOutput(suomilog.Output[OutputT]):
 
 				weight += argsmap[variable].weight
 			
-			# Muussa tapauksessa ylikirjoitetaan sisemmän säännön taivutussääntö tämän säännön taivutussäännöllä
+			# Muussa tapauksessa ylikirjoitetaan sisemmän säännön taivutussääntö tämän säännön taivutussäännöllä (paitsi jos sana ei taivu)
 			else:
 				for token in argsmap[variable].tokens:
-					tokens.append(AnnotatedToken(token.token, suomilog.merge_bits(bits, token.bits), state))
+					new_annotation = "noinfl" if token.annotation == "noinfl" else state
+					tokens.append(AnnotatedToken(token.token, suomilog.merge_bits(bits, token.bits), new_annotation))
 				
 				weight += argsmap[variable].weight
 		
@@ -158,17 +159,16 @@ def get_parser():
 		for line in file:
 			if "::=" in line and not line.startswith("#"):
 				grammar.parse_grammar_line(line.replace("\n", ""), default_output=ReinflectorOutput)
+
 	return suomilog.CYKParser(grammar, "ROOT")
 
-def reinflect(term: str, case_tag: str, plural_tag: str, poss: str = "") -> list[str]:
-
-
+def reinflect(term: str, plural_tag: str, case_tag: str, poss: str = "") -> list[str]:
 	parser = get_parser()
 
 	tokens = fiutils.tokenize(term)
 
 	analysis = parser.parse(tokens)
-	#analysis.print()
+
 	outputs = analysis.get_output(".ROOT{}")
 	if not outputs:
 		return []
@@ -178,23 +178,40 @@ def reinflect(term: str, case_tag: str, plural_tag: str, poss: str = "") -> list
 	for output in sorted(outputs, key=lambda o: o.weight):
 		inflected: list[list[str]] = []
 		for token in output.tokens:
-			if token.annotation == "normal" or token.annotation == "nonlemma_infl":
-				for bit in token.bits:
-					if bit in fiutils.SINGULAR_AND_PLURAL_CASES+fiutils.PLURAL_CASES:
-						case_tag = bit
-					
-					if bit in ["+sg", "+pl"]:
-						plural_tag = bit
+			inflected.append(reinflect_token(token, plural_tag, case_tag, poss))
 
-				new_surfaceform = list(fiutils.inflect_nominal(token.token, case_tag, plural_tag, poss))
-			
-			else:
-				new_surfaceform = [token.token]
-			
-			inflected.append(new_surfaceform)
-		
 		result.extend([" ".join(x) for x in itertools.product(*inflected)])
+
 	return result
+
+def reinflect_token(token: AnnotatedToken, plural_tag: str, case_tag: str, poss: str) -> list[str]:
+	prefix = ""
+	suffix = ""
+	for bit in token.bits:
+		if bit == "-lhyphen":
+			prefix = "-" + prefix
+
+		elif bit == "-rhyphen":
+			suffix = suffix + "-"
+
+		elif bit == "-lquote":
+			prefix = "\"" + prefix
+
+		elif bit == "-rquote":
+			suffix = suffix + "\""
+
+	if token.annotation == "normal" or token.annotation == "nonlemma_infl":
+		for bit in token.bits:
+			if bit in fiutils.SINGULAR_AND_PLURAL_CASES+fiutils.PLURAL_CASES:
+				case_tag = bit
+
+			if bit in ["+sg", "+pl"]:
+				plural_tag = bit
+
+		return list(fiutils.inflect_nominal(prefix + token.token + suffix, plural_tag, case_tag, poss))
+
+	else:
+		return [prefix + token.token + suffix]
 
 def main():
 	argparser = argparse.ArgumentParser()
@@ -206,25 +223,7 @@ def main():
 	if args.debug:
 		import readline
 
-	grammar: suomilog.Grammar[OutputT] = suomilog.Grammar()
-
-	grammar.rules["."] = [
-		WordRule()
-	]
-
-	path = os.path.dirname(os.path.realpath(__file__))
-	with open(os.path.join(path, "np.suomilog")) as file:
-		for line in file:
-			if "::=" in line and not line.startswith("#"):
-				grammar.parse_grammar_line(line.replace("\n", ""), default_output=ReinflectorOutput)
-
-	parser = suomilog.CYKParser(grammar, "ROOT")
-	
-	if args.debug:
-		n_rules = sum([len(category) for category in grammar.rules.values()])
-		print("Ladattu", n_rules, "fraasia.")
-		grammar.print()
-		#parser.print()
+	parser = get_parser()
 
 	while True:
 		try:
@@ -257,30 +256,17 @@ def main():
 				continue
 			
 			for output in sorted(outputs, key=lambda o: o.weight):
-				inflected: list[str] = []
+				inflected: list[list[str]] = []
 				for token in output.tokens:
-					if token.annotation == "normal" or token.annotation == "nonlemma_infl":
-						case_tag = args.case_tag
-						plural_tag = args.plural_tag
-						for bit in token.bits:
-							if bit in fiutils.SINGULAR_AND_PLURAL_CASES+fiutils.PLURAL_CASES:
-								case_tag = bit
-							
-							if bit in ["+sg", "+pl"]:
-								plural_tag = bit
+					inflected.append(reinflect_token(token, args.plural_tag, args.case_tag, ""))
 
-						new_surfaceform = list(fiutils.inflect_nominal(token.token, case_tag, plural_tag))[0]
-					
-					else:
-						new_surfaceform = token.token
-					
-					inflected.append(new_surfaceform)
-
+				results = [" ".join(x) for x in itertools.product(*inflected)]
 				if args.debug:
-					print(args.plural_tag + args.case_tag + " ->", " ".join(inflected), f"(paino: {output.weight})")
+					for result in results:
+						print(args.plural_tag + args.case_tag + " ->", result, f"(paino: {output.weight})")
 
 				else:
-					print(" ".join(inflected))
+					print(results[0])
 					break  # Halutaan vain yksi tulos ei-debugtilassa
 
 
