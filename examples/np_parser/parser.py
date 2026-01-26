@@ -210,7 +210,7 @@ def reinflect_token(token: AnnotatedToken, plural_tag: str, case_tag: str, poss:
 			if bit in fiutils.SINGULAR_AND_PLURAL_CASES+fiutils.PLURAL_CASES:
 				case_tag = bit
 
-			if bit in ["+sg", "+pl"]:
+			if bit in ["+sg", "+pl"] and case_tag not in ["+com", "+ins"]:
 				plural_tag = bit
 
 		return [prefix + t + suffix for t in fiutils.inflect_nominal(token.token, plural_tag, case_tag, poss)]
