@@ -25,7 +25,7 @@ def match_bits(tbits: AbstractSet[str], bits: AbstractSet[str]):
 	return tbits >= positive_bits and not (tbits & negative_bits)
 
 
-def merge_bits(tbits: AbstractSet[str], bits: AbstractSet[str], extra_bitsets: Mapping[str, AbstractSet[str]] | None = None) -> frozenset[str]:
+def merge_bits(tbits: AbstractSet[str], bits: AbstractSet[str], extra_bitsets: Mapping[str, AbstractSet[str]] | None = None, allow_minus: bool = True) -> frozenset[str]:
 	"""
 	The first argument is the bits on the symbol (including $ and minus bits).
 	The second argument is the incoming bits.
@@ -45,8 +45,13 @@ def merge_bits(tbits: AbstractSet[str], bits: AbstractSet[str], extra_bitsets: M
 
 	new_bits -= {bit for bit in new_bits if bit.startswith("$")}
 
-	minus_bits = {bit for bit in new_bits if bit.startswith("\\")}  # Removes the minus bits themselves
-	minus_bits |= {minus_bit[1:] for minus_bit in minus_bits}  # Removes the matching plus bits
+	if allow_minus:
+		minus_bits = {bit for bit in new_bits if bit.startswith("\\")}  # Removes the minus bits themselves
+		minus_bits |= {minus_bit[1:] for minus_bit in minus_bits}  # Removes the matching plus bits
+
+	else:
+		minus_bits = set()
+
 	return frozenset(new_bits - minus_bits)
 
 
@@ -256,7 +261,7 @@ class Grammar[OutputT]:
 		if len(tokens) == 3 and tokens[0].startswith("$") and tokens[1] == "=" and tokens[2].startswith("{") and tokens[2].endswith("}"):
 			bitset_name = tokens[0]
 			bits = set(tokens[2][1:-1].split(","))
-			bits = merge_bits(bits, set(), self.bitset_variables)
+			bits = merge_bits(bits, set(), self.bitset_variables, allow_minus=False)
 			self.bitset_variables[bitset_name] = bits
 
 		else:
