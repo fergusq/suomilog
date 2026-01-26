@@ -49,10 +49,6 @@
 # Substantiivilausekkeet
 ###############################################################################
 
-
-Substantiivilauseke määrittämässä erisnimeä (esim ammatit)
-.NP ::= .NP{$} .NOUN-PROP{$} -> ($1) $2
-
 Näillä säännöillä on hierarkia, joka asettaa eri attribuuttien "laskujärjestyksen".
 
 .NP ::= .NP2-PLURAL{$} -> $1
@@ -78,27 +74,32 @@ vaikka konjunktiolauseke kokonaisuudessa on monikollinen.
 Substantiivilausekkeen perässä olevalle obliikville tai infinitiivirakenteelle on asetettu paino,
 koska nämä ovat keskimääräistä harvinaisempia rakenteita:
 
-.NP2 ::= .NP3{$} .OBL -> $1 ($2) :: 1
-.NP2 ::= .NP3{$} .VP-INF -> $1 ($2) :: 1
+.NP2 ::= .NP3{$} .OBL -> $1 ($2) :: 2
+.NP2 ::= .NP3{$} .VP-INF -> $1 ($2) :: 2
 .NP2 ::= .NP3{$} -> $1
 
 Alla on säännöt demonstratiivipronomineille ja artikkeleille.
 Ne ottavat huomioon tapauksia kuten "ne kolme taloa" tai "kauniit kolme taloa",
 jossa on monikollinen artikkeli tai adjektiivi yksiköllisen lukuilmauksen edessä.
 
-.NP3 ::= .ART{$} .NP-ADJ/NOUN{$} -> $1 $2
+.NP3 ::= .ART{$} .NP5{$} -> $1 $2
 .NP3 ::= .ART{$,+pl,\+sg} .NP-NUM{$,+sg} -> $1{+pl} $2
 .NP3 ::= .ART{$,+pl,\+sg} .AP{$,+pl,\+sg} .NP-NUM{$,+sg} -> $1{+pl} $2{+pl} $3
 .NP3 ::= .AP{$,+pl,\+sg} .NP-NUM{$,+sg} -> $1{+pl} $2
 .NP3 ::= .NP-NUM{$} -> $1
-.NP3 ::= .NP-ADJ/NOUN{$} -> $1
+.NP3 ::= .NP5{$} -> $1
 
 Alla säännöt lukuilmauksille.
 Sanalla "yksi" on erikoisasema, koska sen jälkeen substantiivi ei taivu partitiivissa vaan nominatiivissa.
 
-.NP-NUM ::= .NUM{$,+sg,+nom,!yksi:numeral} .NP-ADJ/NOUN{+sg,+par} -> $1 [$2]
-.NP-NUM ::= .NUM{$,+sg,+nom,yksi:numeral} .NP-ADJ/NOUN{+sg,+nom} -> $1 $2
-.NP-NUM ::= .NUM{$,!+sg+nom} .NP-ADJ/NOUN{$} -> $1 [$2]
+.NP-NUM ::= .NUM{$,+sg,+nom,!yksi:numeral} .NP5{+sg,+par} -> $1 [$2]
+.NP-NUM ::= .NUM{$,+sg,+nom,yksi:numeral} .NP5{+sg,+nom} -> $1 $2
+.NP-NUM ::= .NUM{$,!+sg+nom} .NP5{$} -> $1 [$2]
+
+Substantiivilauseke määrittämässä erisnimeä (esim ammatit)
+
+.NP5 ::= .NP-ADJ/NOUN .NOUN-PROP{$} -> ($1) $2
+.NP5 ::= .NP-ADJ/NOUN{$} -> $1
 
 Adjektiivi- ja genetiiviattribuutit:
 
@@ -106,15 +107,20 @@ Adjektiivi- ja genetiiviattribuutit:
 .NP-ADJ/NOUN ::= .GEN .NP-ADJ/NOUN{$} -> ($1) $2
 .NP-ADJ/NOUN ::= .NOUN{$} -> $1
 
-# Halutaan voida taivuttaa myös adjektiiveja erityisesti koska ne voivat vakiintua uusiin substantiivisiin merkityksiin
-
-.NP-ADJ/NOUN ::= .AP{$} -> $1
-
 ###############################################################################
 # Attribuutit
 ###############################################################################
 
 ### Adjektiiviattribuutit ja partisiipit ###
+
+# Listat
+
+.AP ::= .AP-COMMA-LIST{$} .CONJ .AP{$} -> $1 ($2) $3
+
+.AP-COMMA-LIST ::= .AP-COMMA-LIST{$} , .AP{$} -> $1 (,) $2
+.AP-COMMA-LIST ::= .AP{$} -> $1
+
+# Adjektiivit
 
 .AP ::= .ADJ{$} -> $1
 .AP ::= .ADVP .ADJ{$} -> ($1) $2
@@ -143,7 +149,8 @@ Adjektiivi- ja genetiiviattribuutit:
 ### Adverbiaalit ja obliikvit ###
 
 .ADVP ::= .ADVP-COMMA-LIST .CONJ .ADVP -> $1 ($2) $3
-.ADVP-COMMA-LIST ::= .ADVP-COMMA-LIST , .ADVP-COMMA-LIST -> $1 (,) $2
+
+.ADVP-COMMA-LIST ::= .ADVP-COMMA-LIST , .ADVP -> $1 (,) $2
 .ADVP-COMMA-LIST ::= .ADVP -> $1
 
 .ADVP ::= .ADV -> $1
@@ -172,14 +179,22 @@ Näiden sääntöjen edessä ei ole valinnaista adverbiaalilausekketta, sillä s
 
 ### Perussanaluokat ###
 
+# Substantiivit
+
 .NOUN ::= ..{$,:noun} -> $1
 .NOUN ::= ..{$,:verb,+inf4} -> $1
 
-# Erikoistapaus: monisaneinen erisnimi
+Substantivoidut adjektiivit
+
+.NOUN ::= ..{$,:adjective} -> $1 :: 1
+
+Erikoistapaus: monisaneinen erisnimi
 
 .NOUN ::= .NOUN-PROP{$} -> $1
-.NOUN-PROP ::= .NOUN-PROP{$} ..{$,:proper} -> ($1) $2
+.NOUN-PROP ::= .NOUN-PROP ..{$,:proper} -> ($1) $2
 .NOUN-PROP ::= ..{$,:proper} -> $1
+
+# Muut
 
 .PRONOUN ::= ..{$,:pronoun} -> $1
 .ADJ ::= ..{$,:adjective} -> $1
