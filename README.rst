@@ -53,9 +53,9 @@ The function ``suomilog.finnish.tokenize(text)`` is used to tokenize words::
         Token('kadulla', [('katu', {'', ':noun', 'katu:', '«kadulla»', '+ade', '+sg', 'katu:noun'})])
     ]
 
-The function ``suomilog.finnish.inflect_nominal(word, case, plural)`` is used to inflect nouns, adjectives and numerals::
+The function ``suomilog.finnish.inflect_nominal(word, plural, case)`` is used to inflect nouns, adjectives and numerals::
 
     import suomilog.finnish as f
-    print(f.inflect_nominal("kissa", "+par", "+pl")) # kissoja
+    print(f.inflect_nominal("kissa", "+pl", "+par")) # kissoja
 
 
