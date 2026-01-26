@@ -24,9 +24,31 @@ from . import grammar
 DICTIONARY: defaultdict[str, list[grammar.Token]] = defaultdict(list)
 
 def tokenize(text: str) -> list[grammar.Token]:
+	old_tokens: list[str] = pykko_tokenize(text)
+	new_tokens: list[str] = []
+	i = 0
+	while i < len(old_tokens):
+		if i < len(old_tokens) - 2 and old_tokens[i] == "\"" and old_tokens[i+2] == "\"":
+			new_tokens.append("\"" + old_tokens[i+1] + "\"")
+			i += 2
+			continue
+
+		if i < len(old_tokens) - 1 and old_tokens[i] == "\"":
+			new_tokens.append("\"" + old_tokens[i+1])
+			i += 1
+			continue
+
+		if i < len(old_tokens) - 1 and old_tokens[i+1] == "\"":
+			new_tokens.append(old_tokens[i] + "\"")
+			i += 1
+			continue
+
+		new_tokens.append(old_tokens[i])
+		i += 1
+
 	tokens: list[grammar.Token] = []
 	token: str
-	for token in pykko_tokenize(text):
+	for token in new_tokens:
 		tokenizer_bits = set()
 		if token[:1] == "\"":
 			token = token[1:]

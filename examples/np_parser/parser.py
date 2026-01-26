@@ -141,7 +141,9 @@ class WordRule(suomilog.BaseRule[OutputT]):
 		if len(tokens) != 1 or bits and not any(suomilog.match_bits(altbits, bits) for _, altbits in tokens[0].alternatives):
 			return []
 
-		return [OutputT((AnnotatedToken(tokens[0].surfaceform, frozenset(), "normal"),), 0.0)]
+		tokenizer_bits = {bit for _, altbits in tokens[0].alternatives for bit in altbits if bit.startswith("-")}
+
+		return [OutputT((AnnotatedToken(tokens[0].surfaceform, frozenset(tokenizer_bits), "normal"),), 0.0)]
 
 	def expand_bits(self, name: str, grammar: suomilog.Grammar[OutputT], bits: AbstractSet[str], extended=None):
 		return WordRule(self.bits | bits)
@@ -159,6 +161,9 @@ def get_parser():
 		for line in file:
 			if "::=" in line and not line.startswith("#"):
 				grammar.parse_grammar_line(line.replace("\n", ""), default_output=ReinflectorOutput)
+
+			elif line.startswith("$"):
+				grammar.parse_variable_line(line.strip())
 
 	return suomilog.CYKParser(grammar, "ROOT")
 
@@ -208,7 +213,7 @@ def reinflect_token(token: AnnotatedToken, plural_tag: str, case_tag: str, poss:
 			if bit in ["+sg", "+pl"]:
 				plural_tag = bit
 
-		return list(fiutils.inflect_nominal(prefix + token.token + suffix, plural_tag, case_tag, poss))
+		return [prefix + t + suffix for t in fiutils.inflect_nominal(token.token, plural_tag, case_tag, poss)]
 
 	else:
 		return [prefix + token.token + suffix]
@@ -224,6 +229,8 @@ def main():
 		import readline
 
 	parser = get_parser()
+	if args.debug:
+		parser.grammar.print()
 
 	while True:
 		try:

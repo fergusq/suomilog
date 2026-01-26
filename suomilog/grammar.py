@@ -16,7 +16,7 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import AbstractSet, Callable, Self, Sequence
+from typing import AbstractSet, Callable, Mapping, Self, Sequence
 
 
 def match_bits(tbits: AbstractSet[str], bits: AbstractSet[str]):
@@ -25,7 +25,7 @@ def match_bits(tbits: AbstractSet[str], bits: AbstractSet[str]):
 	return tbits >= positive_bits and not (tbits & negative_bits)
 
 
-def merge_bits(tbits: AbstractSet[str], bits: AbstractSet[str]) -> frozenset[str]:
+def merge_bits(tbits: AbstractSet[str], bits: AbstractSet[str], extra_bitsets: Mapping[str, AbstractSet[str]] | None = None) -> frozenset[str]:
 	"""
 	The first argument is the bits on the symbol (including $ and minus bits).
 	The second argument is the incoming bits.
@@ -36,8 +36,16 @@ def merge_bits(tbits: AbstractSet[str], bits: AbstractSet[str]) -> frozenset[str
 	For example:
 	`merge_bits({"$", "\\\\+pl", "+sg"}, {"+pl", "+nom"}) == {"+sg", "+nom"}`
 	"""
-	new_bits = (tbits-{"$"}) | (bits if "$" in tbits else set())
-	minus_bits = {bit for bit in tbits if bit.startswith("\\")}  # Removes the minus bits themselves
+	new_bits: set[str] = set(tbits-{"$"}) | (bits if "$" in tbits else set())
+
+	extra_bitsets = extra_bitsets or {}
+	for bitset_name, bitset in extra_bitsets.items():
+		if bitset_name in new_bits:
+			new_bits |= bitset
+
+	new_bits -= {bit for bit in new_bits if bit.startswith("$")}
+
+	minus_bits = {bit for bit in new_bits if bit.startswith("\\")}  # Removes the minus bits themselves
 	minus_bits |= {minus_bit[1:] for minus_bit in minus_bits}  # Removes the matching plus bits
 	return frozenset(new_bits - minus_bits)
 
@@ -172,8 +180,11 @@ class Grammar[OutputT]:
 	A mapping from nonterminal names to rules.
 	"""
 
-	def __init__(self, rules: dict[str, list["BaseRule[OutputT]"]] | None = None, names: dict[str, str] | None = None):
+	bitset_variables: dict[str, AbstractSet[str]]
+
+	def __init__(self, rules: dict[str, list["BaseRule[OutputT]"]] | None = None, bitset_variables: dict[str, AbstractSet[str]] | None = None):
 		self.rules = rules or {}
+		self.bitset_variables = bitset_variables or {}
 
 	def print(self):
 		for nonterminal_name in sorted(self.rules):
@@ -182,7 +193,10 @@ class Grammar[OutputT]:
 				print(" " + rule.to_code())
 
 	def copy(self):
-		return Grammar({name: self.rules[name].copy() for name in self.rules})
+		return Grammar(
+			{name: rule.copy() for name, rule in self.rules.items()},
+			self.bitset_variables.copy()
+		)
 
 	def update(self, grammar: "Grammar"):
 		for nonterminal_name in grammar.rules:
@@ -227,13 +241,31 @@ class Grammar[OutputT]:
 			rule = ProductionRule(nonterminal_name, words, output, bits)
 			self.rules[nonterminal_name].append(rule)
 			return rule
+
 		else:
-			raise Exception("Syntax error on line `" + line + "'")
+			raise ValueError("Syntax error on line `" + line + "'")
+
+	def parse_variable_line(self, line: str):
+		if debug_level >= 1:
+			print(line)
+
+		if debug_level >= 1:
+			print(line)
+
+		tokens = line.replace("\t", " ").split(" ")
+		if len(tokens) == 3 and tokens[0].startswith("$") and tokens[1] == "=" and tokens[2].startswith("{") and tokens[2].endswith("}"):
+			bitset_name = tokens[0]
+			bits = set(tokens[2][1:-1].split(","))
+			bits = merge_bits(bits, set(), self.bitset_variables)
+			self.bitset_variables[bitset_name] = bits
+
+		else:
+			raise ValueError("Syntax error on line `" + line + "'")
 
 	def expand_bits(self, nonterminal_name: str, bits: AbstractSet[str], extended: dict[str, list["BaseRule[OutputT]"]] | None = None) -> tuple[str, dict[str, list["BaseRule[OutputT]"]]]:
 		if nonterminal_name not in self.rules:
 			return nonterminal_name, {}
-		
+
 		ans: dict[str, list[BaseRule[OutputT]]] = extended or {}
 		name = "." + nonterminal_name + "{" + ",".join(sorted(bits)) + "}"
 		if name in ans:
@@ -351,7 +383,8 @@ class ProductionRule[OutputT](BaseRule[OutputT]):
 		ans = []
 		for word in self.words:
 			if isinstance(word, Nonterminal):
-				new_bits = merge_bits(word.bits, bits)
+				default_var = f"$default(.{word.name})"
+				new_bits = merge_bits(word.bits|{default_var}, bits, grammar.bitset_variables)
 				new_name, _ = grammar.expand_bits(word.name, new_bits, extended)
 				ans += [Nonterminal(new_name, set(), unexpanded=word)]
 			
