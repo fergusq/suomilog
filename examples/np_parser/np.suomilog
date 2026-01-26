@@ -60,8 +60,11 @@ Vasemmalla puolella oleva !+sg-bitti estää sääntöä laajentumasta, jos sill
 
 .NP2-PLURAL{!+sg} ::= .NP2-COMMA-LIST{$} .CONJ .NP2-KEEP-PLURALITY{$} -> $1 ($2) $3
 
-.NP2-COMMA-LIST ::= .NP2-KEEP-PLURALITY{$} , .NP2-COMMA-LIST{$} -> $1 (,) $2
-.NP2-COMMA-LIST ::= .NP2-KEEP-PLURALITY{$} -> $1
+.NP2-COMMA-LIST ::= .NP2-COMMA-LIST{$} , .NP2-LIST-ITEM{$} -> $1 (,) $2
+.NP2-COMMA-LIST ::= .NP2-LIST-ITEM{$} -> $1
+
+.NP2-LIST-ITEM ::= .NP2-KEEP-PLURALITY{$} -> $1
+.NP2-LIST-ITEM ::= .PREFIX -> ($1)
 
 Keep plurality -sääntö yliajaa ylhäältä annetut +pl-bitit ja sallii yksikölliset lausekkeet.
 \+pl-bitti on miinusbitti, joka poistaa dollarista +pl-bitin jos sellainen on.
@@ -107,6 +110,10 @@ Adjektiivi- ja genetiiviattribuutit:
 .NP-ADJ/NOUN ::= .GEN .NP-ADJ/NOUN{$} -> ($1) $2
 .NP-ADJ/NOUN ::= .NOUN{$} -> $1
 
+Substantivoituneet adjektiivit:
+
+.NP-ADJ/NOUN ::= .AP{$} -> $1 :: 1
+
 ###############################################################################
 # Attribuutit
 ###############################################################################
@@ -125,6 +132,10 @@ Adjektiivi- ja genetiiviattribuutit:
 .AP ::= .ADJ{$} -> $1
 .AP ::= .ADVP .ADJ{$} -> ($1) $2
 .AP ::= .ADJ{+sg,+gen} .ADJ{$} -> ($1) $2
+
+# Järjestysluvut
+
+.AP ::= .ORD{$} -> $1
 
 # Agenttipartisiippi
 
@@ -157,7 +168,7 @@ Adjektiivi- ja genetiiviattribuutit:
 .ADVP ::= .OBL -> $1
 
 .OBL ::= .NP-CASE -> $1
-.OBL ::= .GEN .ADPOS -> $1 $2
+.OBL ::= .GEN .ADPOS -> ($1) $2
 
 ###############################################################################
 # Verbirakenteet
@@ -170,12 +181,16 @@ Näiden sääntöjen edessä ei ole valinnaista adverbiaalilausekketta, sillä s
 .VP-INF ::= .OBL .ADVP .VERB{$,+inf3} -> $1 $2 $3
 
 .VP-PART ::= .VERB-PART{$} -> $1
-.VP-PART ::= .OBL .VERB-PART{$} -> ($1) $2
-.VP-PART ::= .OBL .ADVP .VERB-PART{$} -> ($1 $2) $3
+.VP-PART ::= .OBL-LIST .VERB-PART{$} -> ($1) $2
+
+.OBL-LIST ::= .OBL -> $1
+.OBL-LIST ::= .OBL-LIST .ADVP -> $1 $2
 
 ###############################################################################
 # Sanetaso
 ###############################################################################
+
+$default(..) = {!-rhyphen}
 
 ### Perussanaluokat ###
 
@@ -191,8 +206,10 @@ Substantivoidut adjektiivit
 Erikoistapaus: monisaneinen erisnimi
 
 .NOUN ::= .NOUN-PROP{$} -> $1
+
 .NOUN-PROP ::= .NOUN-PROP ..{$,:proper} -> ($1) $2
 .NOUN-PROP ::= ..{$,:proper} -> $1
+.NOUN-PROP{!+sg} ::= ..{$,:proper-pl,\+pl} -> $1
 
 # Muut
 
@@ -200,10 +217,12 @@ Erikoistapaus: monisaneinen erisnimi
 .ADJ ::= ..{$,:adjective} -> $1
 .ADJ ::= ..{$,:participle} -> $1
 .NUM ::= ..{$,:numeral} -> $1
+.ORD ::= ..{$,:ordinal} -> $1
 .CONJ ::= ..{:conjunction} -> $1
 .ADV ::= ..{:adverb} -> $1
 .VERB ::= ..{$,:verb} -> $1
 .ADPOS ::= ..{$,:adposition} -> $1
+.PREFIX ::= ..{$,-rhyphen,\!-rhyphen} -> $1{-rhyphen}
 
 ### Verbit ###
 
