@@ -64,7 +64,7 @@ Vasemmalla puolella oleva !+sg-bitti estää sääntöä laajentumasta, jos sill
 .NP2-COMMA-LIST ::= .NP2-LIST-ITEM{$} -> $1
 
 .NP2-LIST-ITEM ::= .NP2-KEEP-PLURALITY{$} -> $1
-.NP2-LIST-ITEM ::= .PREFIX -> ($1)
+.NP2-LIST-ITEM ::= .PREFIX -> ($1) :: 1
 
 Keep plurality -sääntö yliajaa ylhäältä annetut +pl-bitit ja sallii yksikölliset lausekkeet.
 \+pl-bitti on miinusbitti, joka poistaa dollarista +pl-bitin jos sellainen on.
@@ -108,11 +108,19 @@ Adjektiivi- ja genetiiviattribuutit:
 
 .NP-ADJ/NOUN ::= .AP{$} .NP-ADJ/NOUN{$} -> $1 $2
 .NP-ADJ/NOUN ::= .GEN .NP-ADJ/NOUN{$} -> ($1) $2
+.NP-ADJ/NOUN ::= .ELLIPSED-NOUN{$} -> $1
 .NP-ADJ/NOUN ::= .NOUN{$} -> $1
 
 Substantivoituneet adjektiivit:
 
 .NP-ADJ/NOUN ::= .AP{$} -> $1 :: 1
+
+Ellipsit:
+
+.ELLIPSED-NOUN ::= .PREFIX-COMMA-LIST .CONJ .NOUN{$} -> ($1 $2) $3
+
+.PREFIX-COMMA-LIST ::= .PREFIX-COMMA-LIST , .PREFIX -> $1 $2
+.PREFIX-COMMA-LIST ::= .PREFIX -> $1
 
 ###############################################################################
 # Attribuutit
