@@ -125,10 +125,10 @@ PLURAL_CASES = [
 def inflect_nominal(word: str, plural_tag: str, case_tag: str, poss_tag: str = ""):
 	assert plural_tag in ["+sg", "+pl"], plural_tag
 	if plural_tag == "+pl":
-		assert case_tag in SINGULAR_AND_PLURAL_CASES or case_tag in PLURAL_CASES
+		assert case_tag in SINGULAR_AND_PLURAL_CASES + PLURAL_CASES, f"{case_tag} not in {SINGULAR_AND_PLURAL_CASES + PLURAL_CASES}"
 	
 	else:
-		assert case_tag in SINGULAR_AND_PLURAL_CASES
+		assert case_tag in SINGULAR_AND_PLURAL_CASES, f"{case_tag} not in {SINGULAR_AND_PLURAL_CASES}"
 
 	new_morphtags = []
 	for analysis in pykko.analyze(word):
