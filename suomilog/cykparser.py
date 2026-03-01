@@ -178,10 +178,12 @@ class CYKAnalysis[OutputT]:
 		for rule in self.cyk_table[(start, end)]:
 			if output := self.cyk_parser.outputs.get((rule_name, rule), None):
 				args = self.get_output(rule, start, end)
-				assert args is not None
 				assert isinstance(output, grammar.Output)
-				for arg in args:
-					ans.add(output.eval((arg,)))
+				if args is None:
+					ans.add(output.eval(()))
+				else:
+					for arg in args:
+						ans.add(output.eval((arg,)))
 
 		for split in self.split_table[(start, end, rule_name)]:
 			for rule1 in self.cyk_table[(start, split)]:
