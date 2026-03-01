@@ -168,7 +168,7 @@ class CYKAnalysis[OutputT]:
 		if rule_name not in self.cyk_table[(start, end)]:
 			return frozenset()
 
-		if not rule_name.startswith("."):  # jos kyseessä on terminaali
+		if not rule_name.startswith(".") or rule_name == ".":  # jos kyseessä on terminaali
 			return None
 
 		ans: set[OutputT | DenormalizedArgs] = set()
