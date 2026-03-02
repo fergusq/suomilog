@@ -15,28 +15,39 @@
 # along with this program. If not, see <http://www.gnu.org/licenses/>.
 
 from collections import defaultdict
-from typing import NamedTuple, Sequence
+from typing import Hashable, NamedTuple, Sequence
 from . import grammar
 
 
 type CYKTable = defaultdict[tuple[int, int], set[str]]
 type SplitTable = defaultdict[tuple[int, int, str], set[int]]
 type TokenOutputTable[OutputT] = defaultdict[tuple[int, int, str], set[OutputT]]
+type NormalizedOutput[OutputT] = grammar.Output[OutputT] | "DenormalizeStartOutput[OutputT]" | "DenormalizeChainOutput[OutputT]" | "DenormalizeEndOutput[OutputT]"
 
 
 class CYKParser[OutputT]:
-	token_rules: dict[str, grammar.Terminal | grammar.BaseRule[OutputT]]
+	token_rules: dict[str, grammar.Terminal]
+	custom_rules: dict[str, grammar.BaseRule[OutputT]]
+	zero_rules: set[str]
 	one_rules: defaultdict[str, set[str]]
 	one_rules_expanded: defaultdict[str, set[str]]
 	two_rules: defaultdict[tuple[str, str], set[str]]
-	outputs: dict[tuple[str, str | tuple[str, str]], grammar.Output[OutputT] | "DenormalizeStartOutput[OutputT]" | "DenormalizeChainOutput[OutputT]" | "DenormalizeEndOutput[OutputT]"]
+	two_rules_zero_left: defaultdict[str, set[tuple[str, str]]]
+	two_rules_zero_right: defaultdict[str, set[tuple[str, str]]]
+	outputs: defaultdict[tuple[str, str | tuple[str, str]], list[NormalizedOutput[OutputT]]]
+	zero_outputs: dict[str, frozenset[OutputT]]
 
 	def __init__(self, grammar: grammar.Grammar[OutputT], root_nonterminal_name: str):
 		self.token_rules = {}
+		self.custom_rules = {}
+		self.zero_rules = set()
 		self.one_rules = defaultdict(set)
 		self.one_rules_expanded = defaultdict(set)
 		self.two_rules = defaultdict(set)
-		self.outputs = {}
+		self.two_rules_zero_left = defaultdict(set)
+		self.two_rules_zero_right = defaultdict(set)
+		self.outputs = defaultdict(list)
+		self.zero_outputs = {}
 		self.grammar = grammar
 		self._to_CNF(root_nonterminal_name)
 
@@ -64,8 +75,7 @@ class CYKParser[OutputT]:
 					
 					if len(new_words) == 1:
 						self.one_rules[new_words[0]].add(nonterminal_name)
-						assert (nonterminal_name, new_words[0]) not in self.outputs
-						self.outputs[(nonterminal_name, new_words[0])] = rule.output
+						self.outputs[(nonterminal_name, new_words[0])].append(rule.output)
 					
 					else:
 						prev = nonterminal_name
@@ -74,29 +84,50 @@ class CYKParser[OutputT]:
 							next = f"{nonterminal_name}_{j}_CONT{i}"
 							pair = (new_words[i], next)
 							self.two_rules[pair].add(prev)
-							assert (prev, pair) not in self.outputs
-							self.outputs[(prev, pair)] = DenormalizeChainOutput(is_nonterminal[i]) if i != 0 else DenormalizeEndOutput(is_nonterminal[i], rule.output)
+							self.outputs[(prev, pair)].append(DenormalizeChainOutput(is_nonterminal[i]) if i != 0 else DenormalizeEndOutput(is_nonterminal[i], rule.output))
 							prev = next
 						
 						pair = (new_words[-2], new_words[-1])
 						self.two_rules[pair].add(prev)
-						assert (prev, pair) not in self.outputs, f"{prev}, {pair}"
-						self.outputs[(prev, pair)] = DenormalizeStartOutput(is_nonterminal[-2], is_nonterminal[-1]) if len(new_words) > 2 else rule.output
+						self.outputs[(prev, pair)].append(DenormalizeStartOutput(is_nonterminal[-2], is_nonterminal[-1]) if len(new_words) > 2 else rule.output)
 
 				else:
-					# Oma sääntö.
-					# TODO: Tue muita kuin yhden saneen jäsentäviä omia sääntöjä.
-					self.token_rules[nonterminal_name] = rule
-		
-		for a, b in list(self.one_rules.items()):
-			self.one_rules_expanded[a] = set(b)
-			queue = list(b)
+					self.custom_rules[nonterminal_name] = rule
+					if rule.allows_empty_content():
+						self.zero_rules.add(nonterminal_name)
+						self.zero_outputs[nonterminal_name] = frozenset(rule.match(self.grammar, [], set()))
+
+		# Calculating expanded one rules (and expanded two rules containing a zero rule)
+		all_symbols = set()
+		all_symbols |= self.one_rules.keys()
+		for a, b in self.two_rules.keys():
+			all_symbols |= {a, b}
+
+		all_symbols |= self.custom_rules.keys()
+		for nonterminals in [*self.one_rules.values(), *self.two_rules.values()]:
+			all_symbols |= nonterminals
+
+		for a in all_symbols:
+			queue = [a]
 			while queue:
 				rule_name = queue.pop()
 				for rule in self.one_rules[rule_name]:
 					if rule not in self.one_rules_expanded[a]:
 						self.one_rules_expanded[a].add(rule)
 						queue.append(rule)
+
+				for zero_rule in self.zero_rules:
+					for rule in self.two_rules[(zero_rule, rule_name)]:
+						if rule not in self.one_rules_expanded[a]:
+							self.one_rules_expanded[a].add(rule)
+							self.two_rules_zero_left[rule].add((zero_rule, rule_name))
+							queue.append(rule)
+
+					for rule in self.two_rules[(rule_name, zero_rule)]:
+						if rule not in self.one_rules_expanded[a]:
+							self.one_rules_expanded[a].add(rule)
+							self.two_rules_zero_right[rule].add((rule_name, zero_rule))
+							queue.append(rule)
 	
 	def parse(self, tokens: list[grammar.Token]) -> "CYKAnalysis[OutputT]":
 		cyk_table: CYKTable = defaultdict(set)
@@ -104,13 +135,15 @@ class CYKParser[OutputT]:
 		token_outputs: TokenOutputTable = defaultdict(set)
 		for i in range(len(tokens)):
 			for rule_name, token_rule in self.token_rules.items():
-				if isinstance(token_rule, grammar.BaseRule):
-					if token_output := token_rule.match(self.grammar, tokens[i:i+1], set()):
-						cyk_table[(i, i+1)] |= {rule_name} | self.one_rules_expanded[rule_name]
-						token_outputs[(i, i+1, rule_name)] |= set(token_output)
-					
-				elif token_rule.matches_token(tokens[i]):
+				if token_rule.matches_token(tokens[i]):
 					cyk_table[(i, i+1)] |= {rule_name} | self.one_rules_expanded[rule_name]
+
+			for rule_name, custom_rule in self.custom_rules.items():
+				if token_output := custom_rule.match(self.grammar, tokens[i:i+1], set()):
+					if not all(isinstance(t, Hashable) for t in token_output):
+						raise ValueError(f"Output of {rule_name} for {tokens[i:i+1]} is not hashable: {token_output}")
+					cyk_table[(i, i+1)] |= {rule_name} | self.one_rules_expanded[rule_name]
+					token_outputs[(i, i+1, rule_name)] |= set(token_output)
 		
 		for span in range(2, len(tokens)+1):
 			for start in range(len(tokens)-span+1):
@@ -121,47 +154,64 @@ class CYKParser[OutputT]:
 							for rule_name in self.two_rules[(rule1, rule2)]:
 								cyk_table[(start, end)] |= {rule_name} | self.one_rules_expanded[rule_name]
 								split_table[(start, end, rule_name)] |= {split}
+
+				for rule_name, custom_rule in self.custom_rules.items():
+					if token_output := custom_rule.match(self.grammar, tokens[start:end], set()):
+						if not all(isinstance(t, Hashable) for t in token_output):
+							raise ValueError(f"Output of {rule_name} for {tokens[start:end]} is not hashable: {token_output}")
+						cyk_table[(start, end)] |= {rule_name} | self.one_rules_expanded[rule_name]
+						token_outputs[(start, end, rule_name)] |= set(token_output)
 		
 		return CYKAnalysis(self, tokens, cyk_table, split_table, token_outputs)
-	
+
 	def print(self):
 		print("Token rules:")
 		for a, b in self.token_rules.items():
 			print(a, "<-", b.to_code())
-		
+
 		print("One rules:")
 		for a, B in self.one_rules.items():
 			for b in sorted(B):
 				print(b, "<-", a)
-		
+
 		print("Two rules:")
 		for (a, b), C in self.two_rules.items():
 			for c in sorted(C):
 				print(c, "<-", a, b)
-		
+
+		print("Zero rules:")
+		for b in self.zero_rules:
+			print(b, "<-")
+
 		print("Expanded one rules:")
-		for a, B in self.one_rules_expanded.items():
+		for a, B in sorted(self.one_rules_expanded.items(), key=lambda i: str(i[1])):
 			print(B, "<-", a)
-		
+
 		print("Outputs:")
 		for a, b in self.outputs.items():
 			print(repr(a), repr(b))
 
+		print("Zero outputs:")
+		for a, b in self.zero_outputs.items():
+			print(repr(a), repr(b))
+
 
 class CYKAnalysis[OutputT]:
+	memoized_outputs: dict[tuple[str, int, int], frozenset[OutputT | "DenormalizedArgs[OutputT]"] | None]
 	def __init__(self, cyk_parser: CYKParser[OutputT], tokens: list[grammar.Token], cyk_table: CYKTable, split_table: SplitTable, token_outputs: TokenOutputTable):
 		self.cyk_parser = cyk_parser
 		self.tokens = tokens
 		self.cyk_table = cyk_table
 		self.split_table = split_table
 		self.token_outputs = token_outputs
+		self.memoized_outputs = {}
 
-	def get_output(self, rule_name: str, start: int = 0, end: int = 0) -> frozenset[OutputT] | None:
-		ans = self._get_output(rule_name, start, end)
+	def get_output(self, rule_name: str, start: int = 0, end: int = 0, memoize=True) -> frozenset[OutputT] | None:
+		ans = self._get_output(rule_name, start, end, memoize=memoize)
 		assert ans is None or all(not isinstance(arg, DenormalizedArgs) for arg in ans)
 		return ans  # type: ignore
 
-	def _get_output(self, rule_name: str, start: int = 0, end: int = 0) -> frozenset[OutputT | "DenormalizedArgs[OutputT]"] | None:
+	def _get_output(self, rule_name: str, start: int, end: int, memoize: bool) -> frozenset[OutputT | "DenormalizedArgs[OutputT]"] | None:
 		if end <= 0:
 			end = len(self.tokens) - end
 
@@ -171,12 +221,20 @@ class CYKAnalysis[OutputT]:
 		if not rule_name.startswith(".") or rule_name == ".":  # jos kyseessä on terminaali
 			return None
 
+		if start == end:
+			return self.cyk_parser.zero_outputs[rule_name]
+
+		if memoize:
+			key = (rule_name, start, end)
+			if key in self.memoized_outputs:
+				return self.memoized_outputs[key]
+
 		ans: set[OutputT | DenormalizedArgs] = set()
 		if token_output := self.token_outputs.get((start, end, rule_name), None):
 			ans |= token_output
 
 		for rule in self.cyk_table[(start, end)]:
-			if output := self.cyk_parser.outputs.get((rule_name, rule), None):
+			for output in self.cyk_parser.outputs.get((rule_name, rule), []):
 				args = self.get_output(rule, start, end)
 				assert isinstance(output, grammar.Output)
 				if args is None:
@@ -188,37 +246,65 @@ class CYKAnalysis[OutputT]:
 		for split in self.split_table[(start, end, rule_name)]:
 			for rule1 in self.cyk_table[(start, split)]:
 				for rule2 in self.cyk_table[(split, end)]:
-					if output := self.cyk_parser.outputs.get((rule_name, (rule1, rule2)), None):
-						args1 = self._get_output(rule1, start, split)
-						args2 = self._get_output(rule2, split, end)
+					for output in self.cyk_parser.outputs.get((rule_name, (rule1, rule2)), []):
+						args1 = self._get_output(rule1, start, split, memoize)
+						args2 = self._get_output(rule2, split, end, memoize)
 
-						if args1 is None:
-							args1 = frozenset({None})
+						self._add_two_rule_output(ans, output, args1, args2)
 
-						if args2 is None:
-							args2 = frozenset({None})
+		for zero_rule, rule2 in self.cyk_parser.two_rules_zero_left[rule_name]:
+			if rule2 in self.cyk_table[(start, end)]:
+				for output in self.cyk_parser.outputs.get((rule_name, (zero_rule, rule2)), []):
+					args1 = self.cyk_parser.zero_outputs[zero_rule]
+					args2 = self._get_output(rule2, start, end, memoize)
+					self._add_two_rule_output(ans, output, args1, args2)
 
-						assert args1 and args2 and len(args1) > 0 and len(args2) > 0
-						for arg1 in args1:
-							assert not isinstance(arg1, DenormalizedArgs)
-							for arg2 in args2:
-								if isinstance(output, grammar.Output):
-									assert not isinstance(arg2, DenormalizedArgs)
-									ans.add(output.eval([arg for arg in (arg1, arg2) if arg is not None]))
+		for rule1, zero_rule in self.cyk_parser.two_rules_zero_right[rule_name]:
+			if rule1 in self.cyk_table[(start, end)]:
+				for output in self.cyk_parser.outputs.get((rule_name, (rule1, zero_rule)), []):
+					args1 = self._get_output(rule1, start, end, memoize)
+					args2 = self.cyk_parser.zero_outputs[zero_rule]
+					self._add_two_rule_output(ans, output, args1, args2)
 
-								elif isinstance(output, DenormalizeStartOutput):
-									assert not isinstance(arg2, DenormalizedArgs)
-									ans.add(output.start_chain(arg1, arg2))
+		result = frozenset(ans)
 
-								elif isinstance(output, DenormalizeChainOutput):
-									assert isinstance(arg2, DenormalizedArgs)
-									ans.add(output.continue_chain(arg1, arg2))
-								
-								elif isinstance(output, DenormalizeEndOutput):
-									assert isinstance(arg2, DenormalizedArgs)
-									ans.add(output.end_chain(arg1, arg2))
-		
-		return frozenset(ans)
+		if memoize:
+			self.memoized_outputs[(rule_name, start, end)] = result
+
+		return result
+
+	def _add_two_rule_output(
+		self,
+		ans: set[OutputT | "DenormalizedArgs[OutputT]"],
+		output: NormalizedOutput[OutputT],
+		args1: frozenset[OutputT | "DenormalizedArgs[OutputT]" | None] | None,
+		args2: frozenset[OutputT | "DenormalizedArgs[OutputT]" | None] | None
+	):
+		if args1 is None:
+			args1 = frozenset({None})
+
+		if args2 is None:
+			args2 = frozenset({None})
+
+		assert args1 and args2 and len(args1) > 0 and len(args2) > 0
+		for arg1 in args1:
+			assert not isinstance(arg1, DenormalizedArgs)
+			for arg2 in args2:
+				if isinstance(output, grammar.Output):
+					assert not isinstance(arg2, DenormalizedArgs)
+					ans.add(output.eval([arg for arg in (arg1, arg2) if arg is not None]))
+
+				elif isinstance(output, DenormalizeStartOutput):
+					assert not isinstance(arg2, DenormalizedArgs)
+					ans.add(output.start_chain(arg1, arg2))
+
+				elif isinstance(output, DenormalizeChainOutput):
+					assert isinstance(arg2, DenormalizedArgs)
+					ans.add(output.continue_chain(arg1, arg2))
+
+				elif isinstance(output, DenormalizeEndOutput):
+					assert isinstance(arg2, DenormalizedArgs)
+					ans.add(output.end_chain(arg1, arg2))
 
 	def print(self) -> None:
 		try:

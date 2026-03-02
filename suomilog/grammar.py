@@ -117,12 +117,17 @@ class SurfaceformTerminal(Terminal):
 	A terminal that matches to tokens with the correct surfaceform.
 	"""
 	surfaceform: str
+	ignore_case: bool = True
 
 	def to_code(self) -> str:
-		return self.surfaceform
+		return self.surfaceform + ("" if self.ignore_case else ":c")
 
 	def matches_token(self, token: Token) -> bool:
-		return token.surfaceform == self.surfaceform
+		if self.ignore_case:
+			return token.surfaceform.lower() == self.surfaceform.lower()
+
+		else:
+			return token.surfaceform == self.surfaceform
 
 	def expand_bits(self, bits: AbstractSet[str]) -> "SurfaceformTerminal":
 		return self
@@ -299,7 +304,11 @@ def parse_word_in_grammar_line(token: str) -> BaseformTerminal | SurfaceformTerm
 	elif has_bits:
 		return BaseformTerminal(token, bits)
 	else:
-		return SurfaceformTerminal(token)
+		ignore_case = True
+		if token.endswith(":c"):
+			ignore_case = False
+			token = token[:-2]
+		return SurfaceformTerminal(token, ignore_case)
 
 
 debug_level = 0
@@ -331,6 +340,9 @@ class BaseRule[OutputT](ABC):
 	@abstractmethod
 	def expand_bits(self, name: str, grammar: Grammar[OutputT], bits: AbstractSet[str], extended: dict[str, list["BaseRule[OutputT]"]] | None = None) -> Self:
 		...
+
+	def allows_empty_content(self) -> bool:
+		return False
 
 
 class ProductionRule[OutputT](BaseRule[OutputT]):
